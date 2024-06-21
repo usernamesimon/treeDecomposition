@@ -14,7 +14,6 @@
 /* these arrays may or may not be sorted: if one gets long enough
  * and you call graph_has_edge on its source, it will be */
 
-#define SMALL_BUFFER 64
 /* when we are willing to call bsearch */
 #define BSEARCH_THRESHOLD (10)
 
@@ -93,8 +92,8 @@ Graph graph_import(char *inputpath)
 
     /* get the size of the graph */
     int n;
-    char buffer[SMALL_BUFFER];
-    char *str = buffer;
+    char *line = NULL;
+    size_t linelen = 0;
 
     // open the file
     FILE *fptr;
@@ -104,11 +103,13 @@ Graph graph_import(char *inputpath)
         fprintf(stderr, "Not able to open file %s\n", inputpath);
         return NULL;
     }
-    if (fgets(str, SMALL_BUFFER, fptr) == NULL)
+    if (getline(&line, &linelen, fptr) < 0)
     {
         // no point in continuing if we could not read
+        free(line);
         return NULL;
     }
+    char *str = line;
     char *tok = strtok(str, " ");
     if (tok == NULL)
         return NULL;
@@ -151,17 +152,19 @@ Graph graph_import(char *inputpath)
         assert(work);
 
         // get the next line from file
-        if (fgets(str, SMALL_BUFFER, fptr) == NULL)
+        if (getline(&line, &linelen, fptr) < 0)
         {
             // unexpected EOF etc.
             fprintf(stderr, "Error parsing the adjacency list for node %d\n", i);
             graph_destroy(g);
+            free(line);
             if (fptr != NULL) fclose(fptr);
             return NULL;
         }
         // split line into tokens and convert to int
         int neighbour_count = 0;
         int node = 0;
+        char* str = line;
         tok = strtok(str, " ");
         // the first entry in a line is the node itself
         if (tok != NULL)
@@ -203,6 +206,7 @@ Graph graph_import(char *inputpath)
         assert(g->nodes[i]->neighbours);
     }
     if (fptr != NULL) fclose(fptr);
+    free(line);
 
     /* By reading the adjacency list file, 
     we added the edge only in one node so far,

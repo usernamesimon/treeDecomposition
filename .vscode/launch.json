@@ -6,7 +6,7 @@
             "type": "cppdbg",
             "request": "launch",
             "program": "${workspaceFolder}/.vscode/treedecomp",
-            "args": ["-s", "../data/ER_10_0.50_0.al"],
+            "args": ["-s", "../data/ER.al"],
             "stopAtEntry": false,
             "cwd": "${fileDirname}",
             "environment": [],

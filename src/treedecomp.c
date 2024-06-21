@@ -173,7 +173,29 @@ main (int argc, char **argv)
 
   //FILE* results = fopen("results.csv", "w");
   print_file_header(stdout);
-  benchmark(inputpath, stdout);
+  float start, end;
+  start = clock();
+  Graph g = graph_import(inputpath);
+  if(g==NULL) return 1;
+  Graph g1 = graph_copy(g);
+  Graph g2 = graph_copy(g); 
+  int n = graph_vertex_count(g);
+  end = clock();
+  float time_su = (end-start)/CLOCKS_PER_SEC;
+  
+  int *ordering_d = (int*)malloc(sizeof(int)*n);
+  start = clock();
+  int width_d = order_degree(g, ordering_d);
+  end = clock();
+  float time_d = (end - start)/CLOCKS_PER_SEC;
+  graph_destroy(g);
+  graph_destroy(g1);
+  graph_destroy(g2);
+  fprintf(stdout, "Time for setup: %f\n"
+          "Time for execution: %f\n"
+          "Width: %d\n", time_su, time_d, width_d);
+  
+  //benchmark(inputpath, stdout);
   
   
   return 0;

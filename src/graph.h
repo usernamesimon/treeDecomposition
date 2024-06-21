@@ -23,6 +23,26 @@ void graph_add_directed_edge(Graph, int source, int sink);
 /* add an undirected edge to an existing graph */
 void graph_add_edge(Graph, int vertex1, int vertex2);
 
+/* delete a directed edge from a graph */
+void graph_delete_directed_edge(Graph g, int source, int sink);
+
+/* delete an undirected edge from a graph */
+void graph_delete_edge(Graph g, int vertex1, int vertex2);
+
+/* delete node vertex from the graph.
+    Note: this does not free its memory.
+*/
+void graph_delete_vertex(Graph g, int vertex);
+
+/* eliminate a vertex from the graph
+*/
+int graph_eliminate_vertex(Graph g, int vertex);
+
+/* mark this vertex as included in a
+    mcs set
+*/
+void graph_include_vertex(Graph g, int vertex);
+
 /* sort the neighbours array of each vertex */
 void graph_sort(Graph);
 
@@ -36,17 +56,38 @@ int graph_vertex_count(Graph);
 int graph_edge_count(Graph);
 
 /* return the out-degree of a vertex */
-int graph_out_degree(Graph, int source);
+int graph_vertex_degree(Graph, int source);
+
+/* return the amount of fill-in edges to be added
+    if this vertex was eliminated. 
+    Returns max int value for deleted vertex.
+    Note: This function only works with undirected graphs.
+*/
+int graph_vertex_fillin(Graph g, int vertex);
+
+/* return number of neighbours of vertex that
+    are in the provided set 
+*/
+int graph_vertex_cardinality(Graph g, int vertex, int* set, int set_len);
+
+/* return the index of the vertex with minimal degree
+*/
+int graph_min_degree_index(Graph g);
+
+/* return the index of vertex that results in
+    minimal fill-in edges upon elimination */
+int graph_min_fillin_index(Graph g);
+
+/* return index of the vertex that has 
+    most neighbours in a provided set
+*/
+int graph_max_cardinality_index(Graph g, int* set, int set_len);
 
 /* return 1 if edge (source, sink) exists), 0 otherwise */
 int graph_has_edge(Graph, int source, int sink);
 
-/* Print the graph in adjacency list format*/
+/* Print the graph in adjacency list format.
+    A "d" for the adjacency list of a vertex
+    signals that this vertex is deleted
+*/
 void graph_print(Graph g, FILE *stream);
-
-/* invoke f on all edges (u,v) with source u */
-/* supplying data as final parameter to f */
-/* no particular order is guaranteed */
-void graph_foreach(Graph g, int source,
-        void (*f)(Graph g, int source, int sink, void *data),
-        void *data);

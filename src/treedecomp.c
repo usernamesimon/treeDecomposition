@@ -185,7 +185,7 @@ main (int argc, char **argv)
   
   int *ordering_d = (int*)malloc(sizeof(int)*n);
   start = clock();
-  int width_d = order_degree(g, ordering_d);
+  int width_d = order_mcs(g, ordering_d);
   end = clock();
   float time_d = (end - start)/CLOCKS_PER_SEC;
   graph_destroy(g);

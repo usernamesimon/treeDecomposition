@@ -7,39 +7,21 @@
 
 #include "graph.h"
 
-/* basic directed graph type */
-/* the implementation uses adjacency lists
- * represented as variable-length arrays */
-
-/* these arrays may or may not be sorted: if one gets long enough
- * and you call graph_has_edge on its source, it will be */
-
-/* when we are willing to call bsearch */
-#define BSEARCH_THRESHOLD (10)
-
-static int
-intcmp(const void *a, const void *b)
-{
-    return *((const int *)a) - *((const int *)b);
-}
-
-
 struct node_t
     {
         int d;          /* number of successors */
-        int len;        /* number of slots in array */
-        char is_sorted; /* true if  neighbour array is already sorted */
         char is_deleted; /* deletion flag */
         char in_set;    /* true if this node is included in a mcs set*/
-        int *neighbours;     /* actual arry of successors */
+        int* neighbours; /* list of neighbours for iterating purposes*/
+        int len; /* size of neigbour_list */
+        
     };
 
 struct graph
 {
     int n; /* number of vertices */
     int m; /* number of edges */
-    struct node_t **nodes;   
-    int nodes_len; /* size of nodes array */
+    struct node_t **nodes; /* holds meta information of each vertex*/
     /* if a vertex is deleted, n decreases
         but nodes_len stays the same. Since
         deleting a node is simply setting a
@@ -47,6 +29,12 @@ struct graph
         not necessarily consecutive. Therefore
         iterations over nodes require nodes_len
     */
+    int nodes_len; /* size of nodes array */
+   /* We use an adjacency matrix to keep track
+        of the edges. If an edge between u and v
+        exists, this specific bit is set to 1
+     */
+    char** adjacency_matrix;
 };
 
 char node_invalid(Graph g, int node) {
@@ -65,20 +53,26 @@ Graph graph_create(int n)
     g->m = 0;
     g->nodes = malloc(sizeof(struct node_t *) * n);
     g->nodes_len = n;
+    g->adjacency_matrix = malloc(sizeof(char *) *n);
     assert(g->nodes);
+    /* calculate the size of the adjacency matrix.
+        We need one more byte if the number of 
+        vertices is not a multiple of 8.
+    */
+    int size = n/8;
+    if (n % 8 != 0) size++;
 
     for (int i = 0; i < n; i++)
     {
+        g->adjacency_matrix[i] = malloc(size);
+        memset(g->adjacency_matrix[i], 0, size);
         g->nodes[i] = malloc(sizeof(struct node_t));
         assert(g->nodes[i]);
-
         g->nodes[i]->d = 0;
-        g->nodes[i]->len = 1;
-        g->nodes[i]->is_sorted = 1;
         g->nodes[i]->is_deleted = 0;
         g->nodes[i]->in_set = 0;
-        g->nodes[i]->neighbours = (int *)malloc(sizeof(int));
-        assert(g->nodes[i]->neighbours);
+        g->nodes[i]->neighbours = malloc(sizeof(int));
+        g->nodes[i]->len = 1;
     }
 
     return g;
@@ -131,26 +125,12 @@ Graph graph_import(char *inputpath)
     }
     //fprintf(stdout, "Number of vertices: %d\n", n);
 
-    Graph g = malloc(sizeof(struct graph));
+    Graph g = graph_create(n);
     assert(g);
-    g->n = n;
-    g->m = 0;
-    g->nodes = malloc(sizeof(struct node_t *) * n);
-    g->nodes_len = n;
-    assert(g->nodes);
 
     // populate the adjacency lists of each node
     for (int i = 0; i < g->n; i++)
     {
-        g->nodes[i] = malloc(sizeof(struct node_t));
-        assert(g->nodes[i]);
-        g->nodes[i]->is_sorted = 1;
-        g->nodes[i]->is_deleted = 0;
-        g->nodes[i]->in_set = 0;
-        // reserve space for a fully connected node
-        int *work = (int *)malloc(sizeof(int) * g->n);
-        assert(work);
-
         // get the next line from file
         if (getline(&line, &linelen, fptr) < 0)
         {
@@ -182,7 +162,8 @@ Graph graph_import(char *inputpath)
         while (tok != NULL)
         {
             assert(neighbour_count < n);
-            if (sscanf(tok, "%d", &work[neighbour_count]) != 1)
+            int neighbour;
+            if (sscanf(tok, "%d", &neighbour) != 1)
             {
                 fprintf(stderr, "Conversion error\n");
                 graph_destroy(g);
@@ -190,50 +171,30 @@ Graph graph_import(char *inputpath)
                 return NULL;
             }
             neighbour_count++;
-            if (neighbour_count>0 && 
-                work[neighbour_count] < work[neighbour_count-1])
-            {
-                g->nodes[i]->is_sorted = 0;
-            }
+            graph_add_edge(g, node, neighbour);
             
             tok = strtok(NULL, " ");
         }
-        g->nodes[i]->d = neighbour_count;
-        g->m += neighbour_count;
-        g->nodes[i]->len = neighbour_count + 1;
-        work = (int *)realloc(work, (neighbour_count + 1) * sizeof(int));
-        g->nodes[i]->neighbours = work;
-        assert(g->nodes[i]->neighbours);
     }
     if (fptr != NULL) fclose(fptr);
     free(line);
-
-    /* By reading the adjacency list file, 
-    we added the edge only in one node so far,
-    now add the edges to the other nodes as well*/
-    Graph half = graph_copy(g);
-    for (int i = 0; i < g->n; i++) {
-        for (int j = 0; j < half->nodes[i]->d; j++)
-        {
-            graph_add_directed_edge(g, half->nodes[i]->neighbours[j], i);
-        }
-        
-    }
-    graph_sort(g);
-    graph_destroy(half);
     return g;
 }
 
 /* copy a graph*/
 Graph graph_copy(Graph g){
-    /* TODO: implementing this with memcpy would be an
-        alternative to look into 
-    */
+    assert(g);
+    assert(g->nodes);
+
     Graph copy = malloc(sizeof(struct graph));
     assert(copy);
     copy->n = g->n;
     copy->m = g->m;
-    copy->nodes = malloc(sizeof(struct node_t *) * copy->n);
+    copy->nodes = malloc(sizeof(struct node_t *) * g->n);
+    int size = g->n * g->n/8;
+    if (g->n % 8 != 0) size++;
+    copy->adjacency_matrix = malloc(size);
+    memcpy(copy->adjacency_matrix, g->adjacency_matrix, size);
     copy->nodes_len = g->nodes_len;
     assert(copy->nodes);
     for (int i = 0; i < copy->nodes_len; i++)
@@ -241,7 +202,6 @@ Graph graph_copy(Graph g){
         copy->nodes[i] = malloc(sizeof(struct node_t));
         assert(copy->nodes[i]);
         copy->nodes[i]->d = g->nodes[i]->d;
-        copy->nodes[i]->is_sorted = g->nodes[i]->is_sorted;
         copy->nodes[i]->is_deleted = g->nodes[i]->is_deleted;
         copy->nodes[i]->in_set = g->nodes[i]->in_set;
         copy->nodes[i]->len = copy->nodes[i]->d;
@@ -266,18 +226,23 @@ void graph_destroy(Graph g)
     {
         free(g->nodes[i]->neighbours);
         free(g->nodes[i]);
+        //free(g->adjacency_matrix[i]);
     }
+    free(g->adjacency_matrix);
+    free(g->nodes);
     free(g);
 }
 
-/* add a directed edge to an existing graph */
-void graph_add_directed_edge(Graph g, int u, int v)
+/* add an undirected edge to an existing graph */
+void graph_add_edge(Graph g, int u, int v)
 {
     if(node_invalid(g, u)) return;
     if(node_invalid(g, v)) return;
 
     if (graph_has_edge(g, u, v)) return;
      
+    g->adjacency_matrix[u][v/8] |= 1<<(7-v%8);
+    g->adjacency_matrix[v][u/8] |= 1<<(7-u%8);
     struct node_t* source = g->nodes[u];
     /* do we need to grow the list? */
     while (source->d >= source->len)
@@ -290,80 +255,19 @@ void graph_add_directed_edge(Graph g, int u, int v)
 
     /* now add the new sink */
     source->neighbours[source->d++] = v;
-    source->is_sorted = 0;
+    struct node_t* sink = g->nodes[v];
+    /* do we need to grow the list? */
+    while (sink->d >= sink->len)
+    {
+        sink->len *= 2;
+        sink->neighbours =
+            realloc(sink->neighbours,
+                    sizeof(int) * (sink->len));
+    }
 
+    /* now add the new source */
+    sink->neighbours[sink->d++] = u;
     /* bump edge count */
-    g->m++;
-}
-
-/* add an undirected edge to an existing graph */
-void graph_add_edge(Graph g, int vertex1, int vertex2) {
-    graph_add_directed_edge(g, vertex1, vertex2);
-    graph_add_directed_edge(g, vertex2, vertex1);
-    //correct edge count because it was counted twice
-    g->m--;
-}
-
-/* delete a directed edge from a graph */
-void graph_delete_directed_edge(Graph g, int source, int sink) {
-    if (node_invalid(g, source)) return;
-    if (node_invalid(g, sink)) return;
-
-    if (!graph_has_edge(g, source, sink)) return;
-    
-    // find index of sink in source neighbourhood
-    int index;
-    if (graph_vertex_degree(g, source) >= BSEARCH_THRESHOLD)
-    {
-        /* make sure it is sorted */
-        if (!g->nodes[source]->is_sorted)
-        {
-            qsort(g->nodes[source]->neighbours,
-                  g->nodes[source]->d,
-                  sizeof(int),
-                  intcmp);
-            g->nodes[source]->is_sorted = 1;
-        }
-
-        /* call bsearch to do binary search for us */
-        int *ptr = (int*)bsearch(&sink,
-                       g->nodes[source]->neighbours,
-                       g->nodes[source]->d,
-                       sizeof(int),
-                       intcmp);
-        index = (ptr - g->nodes[source]->neighbours)/sizeof(int);
-    }
-    else
-    {
-        /* just do a simple linear search */
-        /* we could call lfind for this, but why bother? */
-        for (int i = 0; i < g->nodes[source]->d; i++)
-        {
-            if (g->nodes[source]->neighbours[i] == sink) {
-                index = i;
-                break;
-            }
-        }
-    }
-    
-    /* delete sink by shifting following neighbours
-       to the left (overwriting it) and adjusting degree
-    */
-   int remaining = g->nodes[source]->d - 1 - index;
-   g->nodes[source]->d--;
-   g->m--;
-   // if sink was the last entry, nothing has to be moved
-   if (!remaining) return;
-   memcpy(&g->nodes[source]->neighbours[index],
-             &g->nodes[source]->neighbours[index + 1],
-             remaining * sizeof(int));
-    
-}
-
-/* delete an undirected edge from a graph */
-void graph_delete_edge(Graph g, int vertex1, int vertex2) {
-    graph_delete_directed_edge(g, vertex1, vertex2);
-    graph_delete_directed_edge(g, vertex2, vertex1);
     g->m++;
 }
 
@@ -408,16 +312,17 @@ void graph_include_vertex(Graph g, int vertex) {
 void graph_delete_vertex(Graph g, int vertex) {
     if (node_invalid(g, vertex)) return;
     struct node_t* current = g->nodes[vertex];
-    /* don't bother removing the edges of vertex as it is deleted
-        anyway, but remove vertex from its neighbours */
+    int decrease = 0;
+    /* decrease the degree of all neighbours */
     for (int i = 0; i < current->d ; i++)
     {
-        graph_delete_directed_edge(g, current->neighbours[i], vertex);
+        if (node_invalid(g, current->neighbours[i])) continue;
+        g->nodes[current->neighbours[i]]->d--;
+        decrease++;
     }
     current->is_deleted = 1;
-    current->d = 0;
     g->n--;
-    // deleting the edges already corrected g->n
+    g->m -= decrease;
 }
 
 /* return the number of vertices in the graph */
@@ -478,63 +383,13 @@ int graph_vertex_cardinality(Graph g, int vertex, int* set, int set_len) {
     return result;
 }
 
-
-/* sort the neighbours array of each vertex */
-void graph_sort(Graph g) {
-    for (int i = 0; i < g->nodes_len; i++)
-    {
-        // skip deleted nodes
-        if (g->nodes[i]->is_deleted) continue;
-        if (!g->nodes[i]->is_sorted)
-        {
-            qsort(g->nodes[i]->neighbours,
-                  g->nodes[i]->d,
-                  sizeof(int),
-                  intcmp);
-            g->nodes[i]->is_sorted = 1;
-        }
-    }
-    
-}
-
 /* return 1 if edge (source, sink) exists), 0 otherwise */
 int graph_has_edge(Graph g, int source, int sink)
 {
-    int i;
-
     if (node_invalid(g, source) ||
         node_invalid(g, sink)) return 0;
 
-    if (graph_vertex_degree(g, source) >= BSEARCH_THRESHOLD)
-    {
-        /* make sure it is sorted */
-        if (!g->nodes[source]->is_sorted)
-        {
-            qsort(g->nodes[source]->neighbours,
-                  g->nodes[source]->d,
-                  sizeof(int),
-                  intcmp);
-        }
-
-        /* call bsearch to do binary search for us */
-        return bsearch(&sink,
-                       g->nodes[source]->neighbours,
-                       g->nodes[source]->d,
-                       sizeof(int),
-                       intcmp) != 0;
-    }
-    else
-    {
-        /* just do a simple linear search */
-        /* we could call lfind for this, but why bother? */
-        for (i = 0; i < g->nodes[source]->d; i++)
-        {
-            if (g->nodes[source]->neighbours[i] == sink)
-                return 1;
-        }
-        /* else */
-        return 0;
-    }
+    return g->adjacency_matrix[source][sink/8] & 1<<(7-sink%8);
 }
 
 /* return index of vertex with minimal value for

@@ -9,66 +9,6 @@
 char *optarg;
 int optind, opterr, optopt;
 
-/* calculate an elimination ordering for g
-    according to the min degree heuristic.
-    Writes the ordering into set, returns
-    the width of the ordering.
-    Be sure to allocate enough space to set
-    (The number of vertices of g).
-    Attention: this function alters the graph.
-*/
-int order_degree (Graph g, int* set) {
-  int size = graph_vertex_count(g);
-  int width = 0;
-  for (int i = 0; i < size; i++)
-  {
-    int best_node = graph_min_degree_index(g);
-    int current_width = graph_eliminate_vertex(g, best_node);
-    if (current_width > width) width = current_width;
-    set[i] = best_node;
-  }
-  return width;
-}
-
-/* Same as order_degree but use 
-    min fill-in heuristic
-*/
-int order_fillin (Graph g, int* set) {
-  int size = graph_vertex_count(g);
-  int width = 0;
-  for (int i = 0; i < size; i++)
-  {
-    int best_node = graph_min_fillin_index(g);
-    int current_width = graph_eliminate_vertex(g, best_node);
-    if (current_width > width) width = current_width;
-    set[i] = best_node;
-  }
-  return width;  
-}
-
-/* Again same usage, but use 
-    maximum cardinality heuristic.
-*/
-int order_mcs (Graph g, int* set) {
-  int size = graph_vertex_count(g);
-  int width = 0;
-  /* we need to set the initially empty ordering
-      to values that are surely not an index of
-      the graph
-  */
-  for (int i = 0; i < size; i++)
-  {
-    set[i] = -1;
-  }  
-  for (int i = size-1; i > 0; i--) {
-    int best_node = graph_max_cardinality_index(g, set, size);
-    set[i] = best_node;
-    int current_width = graph_vertex_degree(g, best_node);
-    if (current_width > width) width = current_width;
-  }
-  return width;
-}
-
 void print_file_header(FILE* fptr) {
   fprintf(fptr, "Filename, Width Min-Degree, Time Min-Degree, "
               "Width Min-Fill-in, Time Min-Fill-in, "
@@ -80,24 +20,21 @@ int benchmark (char* inputpath, FILE* resultfile) {
   if(g==NULL) return 1;
   Graph g1 = graph_copy(g);
   Graph g2 = graph_copy(g); 
-  int n = graph_vertex_count(g);
+  //int n = graph_vertex_count(g);
 
   float start, end;
-  int *ordering_d = (int*)malloc(sizeof(int)*n);
   start = clock();
-  int width_d = order_degree(g, ordering_d);
+  int width_d = graph_order_degree(g);
   end = clock();
   float time_d = (end - start)/CLOCKS_PER_SEC;
-
-  int *ordering_f = (int*)malloc(sizeof(int)*n);
+  
   start = clock();
-  int width_f = order_fillin(g1, ordering_f);
+  int width_f = graph_order_fillin(g1);
   end = clock();
   float time_f = (end-start)/CLOCKS_PER_SEC;
 
-  int *ordering_mcs = (int*)malloc(sizeof(int)*n);
   start = clock();  
-  int width_mcs = order_fillin(g2, ordering_mcs);
+  int width_mcs = graph_order_fillin(g2);
   end = clock();
   float time_mcs = (end-start)/CLOCKS_PER_SEC;
 
@@ -107,9 +44,6 @@ int benchmark (char* inputpath, FILE* resultfile) {
   graph_destroy(g);
   graph_destroy(g1);
   graph_destroy(g2);
-  free(ordering_d);
-  free(ordering_f);
-  free(ordering_mcs);
   return 0;
 }
 
@@ -177,23 +111,20 @@ main (int argc, char **argv)
   start = clock();
   Graph g = graph_import(inputpath);
   if(g==NULL) return 1;
-  Graph g1 = graph_copy(g);
-  Graph g2 = graph_copy(g); 
-  int n = graph_vertex_count(g);
   end = clock();
   float time_su = (end-start)/CLOCKS_PER_SEC;
   
-  int *ordering_d = (int*)malloc(sizeof(int)*n);
   start = clock();
-  int width_d = order_mcs(g, ordering_d);
+  int width_d = graph_order_mcs(g);
   end = clock();
   float time_d = (end - start)/CLOCKS_PER_SEC;
-  graph_destroy(g);
-  graph_destroy(g1);
-  graph_destroy(g2);
   fprintf(stdout, "Time for setup: %f\n"
           "Time for execution: %f\n"
-          "Width: %d\n", time_su, time_d, width_d);
+          "Width: %d\n"
+          "Ordering plausible: %c",
+           time_su, time_d, width_d,
+           graph_ordering_plausible(g));
+  graph_destroy(g);
   
   //benchmark(inputpath, stdout);
   

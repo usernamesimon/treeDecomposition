@@ -4,39 +4,73 @@
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
+#include <limits.h>
 
 #include "graph.h"
 
 struct node_t
     {
+        int id;         /* id of the node */
         int d;          /* number of successors */
         char is_deleted; /* deletion flag */
-        char in_set;    /* true if this node is included in a mcs set*/
+        char in_set; /* true if the node is already in ordering */
         int* neighbours; /* list of neighbours for iterating purposes*/
         int len; /* size of neigbour_list */
+        int MCS_index; /* this node is contained in <g->MCS->heads[MCS_index]>*/
+        struct node_t *next; /* Next member of the MCS linked list */
+        struct node_t *prev; /* Previous member of MCS linked list */
         
     };
+
+/* For maximum cardinality search we keep
+    an array of sets MCS_t where MCS_t->heads[j] is
+    a list of pointers to nodes which
+    have exactly j neighbours in the 
+    current <g->ordering>. Look at it
+    as an array of linked lists
+    of pointers to nodes in <g->nodes> */
+struct MCS_t {
+    struct node_t **heads;
+    struct node_t **tails;
+    /* max_S is the biggest index i where
+        <MCS_t->heads[i]> is not empty */
+    int max_S;
+    /* len is the size of the heads and tails
+        arrays */
+    int len;
+};
 
 struct graph
 {
     int n; /* number of vertices */
     int m; /* number of edges */
     struct node_t **nodes; /* holds meta information of each vertex*/
-    /* if a vertex is deleted, n decreases
-        but nodes_len stays the same. Since
+
+    /* if a vertex is deleted, <n> decreases
+        but <nodes_len> stays the same. Since
         deleting a node is simply setting a
         flag, the valid entries in nodes are
         not necessarily consecutive. Therefore
-        iterations over nodes require nodes_len
+        iterations over nodes require <nodes_len>
+        and checking for the deletion flag.
     */
     int nodes_len; /* size of nodes array */
+
    /* We use an adjacency matrix to keep track
-        of the edges. If an edge between u and v
-        exists, this specific bit is set to 1
+        of the edges. Note: This is a bit field.
+        A graph has n "rows" of n bits, so approx.
+        n/8 chars per row.
+        If an edge between u and v exists, 
+        the v'th bit in the u'th row is set.
      */
     char** adjacency_matrix;
+
+    int* ordering; /* holds the ordering produced by an elimination ordering*/
+
+    struct MCS_t *MCS; /* structure for maximum cardinality search */
 };
 
+/* check if a node exists and is not deleted */
 char node_invalid(Graph g, int node) {
     if (node < 0 || 
         node >= g->nodes_len ||
@@ -44,7 +78,57 @@ char node_invalid(Graph g, int node) {
     return 0;
 }
 
-/* create a new graph with n vertices labeled 0..n-1 and no edges */
+/* add node g->nodes[node_index] to the MCS
+    lists with set number index
+*/
+void MCS_add_node(Graph g, int node_index, int index) {
+    if (node_invalid(g, node_index)) return;
+    struct node_t *node = g->nodes[node_index];
+    if (g->MCS->tails[index])
+    {
+        g->MCS->tails[index]->next = node;
+        node->prev = g->MCS->tails[index];       
+    } else
+    {
+        g->MCS->heads[index] = node;
+    }    
+    g->MCS->tails[index] = node;
+    if (index > g->MCS->max_S)
+        g->MCS->max_S = index;
+}
+
+/* remove node g->nodes[node_index] from the 
+    MCS lists
+*/
+void MCS_delete_node(Graph g, int node_index) {
+    if (node_invalid(g, node_index)) return;
+    struct node_t *node = g->nodes[node_index];
+    if (node->prev)
+        node->prev->next = node->next;
+
+    if (node->next)
+        node->next->prev = node->prev;
+
+    if (node == g->MCS->heads[node->MCS_index]) {
+        g->MCS->heads[node->MCS_index] = node->next;
+        /* if this was the last node in the list
+            we need to decrease max_S
+        */
+        if (!node->next)
+        {
+            while (!g->MCS->heads[(g->MCS->max_S)]) g->MCS->max_S--;
+        }
+    }
+
+    if (node == g->MCS->tails[node->MCS_index]) {
+        g->MCS->tails[node->MCS_index] = node->prev;
+        
+        // max_S should have been corrected already
+        assert(g->MCS->tails[g->MCS->max_S]);
+        
+    }
+}
+
 Graph graph_create(int n)
 {
     Graph g = malloc(sizeof(struct graph));
@@ -52,9 +136,25 @@ Graph graph_create(int n)
     g->n = n;
     g->m = 0;
     g->nodes = malloc(sizeof(struct node_t *) * n);
+    assert(g->nodes);
     g->nodes_len = n;
     g->adjacency_matrix = malloc(sizeof(char *) *n);
-    assert(g->nodes);
+    g->ordering = malloc(sizeof(int)*n);
+    assert(g->ordering);
+    /* At most a node can be connected to all
+        other nodes which could be in the ordering
+        potentially, therefore n-1 is the maximum for MCS */
+    g->MCS = malloc(sizeof(struct MCS_t));
+    assert(g->MCS);
+    g->MCS->len = n-1;
+    g->MCS->max_S = 0;
+    g->MCS->heads = malloc(sizeof(struct node_t*)*g->MCS->len);
+    assert(g->MCS->heads);
+    g->MCS->tails = malloc(sizeof(struct node_t*)*g->MCS->len);
+    assert(g->MCS->tails);
+    
+    
+    
     /* calculate the size of the adjacency matrix.
         We need one more byte if the number of 
         vertices is not a multiple of 8.
@@ -65,22 +165,43 @@ Graph graph_create(int n)
     for (int i = 0; i < n; i++)
     {
         g->adjacency_matrix[i] = malloc(size);
+        assert(g->adjacency_matrix[i]);
         memset(g->adjacency_matrix[i], 0, size);
+        
         g->nodes[i] = malloc(sizeof(struct node_t));
         assert(g->nodes[i]);
+        g->nodes[i]->id = i;
         g->nodes[i]->d = 0;
         g->nodes[i]->is_deleted = 0;
         g->nodes[i]->in_set = 0;
         g->nodes[i]->neighbours = malloc(sizeof(int));
+        assert(g->nodes[i]->neighbours);
         g->nodes[i]->len = 1;
+        g->nodes[i]->MCS_index = 0;
+        g->nodes[i]->next = NULL;
+        g->nodes[i]->prev = NULL;
+        
+        g->ordering[i] = -1;        
     }
+
+    for (int i = 0; i < g->MCS->len; i++)
+    {
+        g->MCS->heads[i] = NULL;
+        g->MCS->tails[i] = NULL;
+    }
+    
+    /* There is no ordering yet, so every
+        node is in the 0 set 
+    */
+    for (int i = 0; i < g->n; i++)
+    {
+        MCS_add_node(g, i, 0);
+    }
+    
 
     return g;
 }
 
-/* import a graph from a file in adjacency list format
-    The file must start with <# nodes n> where n is the
-    number of vertices in the graph */
 Graph graph_import(char *inputpath)
 {
 
@@ -181,42 +302,73 @@ Graph graph_import(char *inputpath)
     return g;
 }
 
-/* copy a graph*/
 Graph graph_copy(Graph g){
     assert(g);
     assert(g->nodes);
 
     Graph copy = malloc(sizeof(struct graph));
     assert(copy);
+    int n = g->nodes_len;
     copy->n = g->n;
     copy->m = g->m;
-    copy->nodes = malloc(sizeof(struct node_t *) * g->n);
-    int size = g->n * g->n/8;
-    if (g->n % 8 != 0) size++;
-    copy->adjacency_matrix = malloc(size);
-    memcpy(copy->adjacency_matrix, g->adjacency_matrix, size);
-    copy->nodes_len = g->nodes_len;
+    copy->nodes = malloc(sizeof(struct node_t *) * n);
     assert(copy->nodes);
-    for (int i = 0; i < copy->nodes_len; i++)
+    copy->nodes_len = g->nodes_len;
+    copy->adjacency_matrix = malloc(sizeof(char *) * g->n);
+    copy->ordering = malloc(sizeof(int)*n);
+    assert(copy->ordering);
+    
+    copy->MCS = malloc(sizeof(struct MCS_t));
+    assert(copy->MCS);
+    copy->MCS->len = g->MCS->len;
+    copy->MCS->max_S = g->MCS->max_S;
+    copy->MCS->heads = malloc(sizeof(struct node_t*)*g->MCS->len);
+    assert(copy->MCS->heads);
+    copy->MCS->tails = malloc(sizeof(struct node_t*)*g->MCS->len);
+    assert(copy->MCS->tails);
+    
+    /* calculate the size of the adjacency matrix.
+        We need one more byte if the number of 
+        vertices is not a multiple of 8.
+    */
+    int size = n * n/8;
+    if (n % 8 != 0) size++;
+    
+    for (int i = 0; i < n; i++)
     {
+        copy->adjacency_matrix[i] = malloc(size);
+        assert(copy->adjacency_matrix[i]);
+        memcpy(copy->adjacency_matrix[i], g->adjacency_matrix[i], size);
+        
         copy->nodes[i] = malloc(sizeof(struct node_t));
         assert(copy->nodes[i]);
+        copy->nodes[i]->id = g->nodes[i]->id;
         copy->nodes[i]->d = g->nodes[i]->d;
         copy->nodes[i]->is_deleted = g->nodes[i]->is_deleted;
         copy->nodes[i]->in_set = g->nodes[i]->in_set;
-        copy->nodes[i]->len = copy->nodes[i]->d;
+        copy->nodes[i]->len = g->nodes[i]->len;
         copy->nodes[i]->neighbours = (int*)malloc(sizeof(int)*copy->nodes[i]->len);
         assert(copy->nodes[i]->neighbours);
-        for (int j = 0; j < copy->nodes[i]->d; j++)
-        {
-            copy->nodes[i]->neighbours[j] = g->nodes[i]->neighbours[j];
-        }
+        copy->nodes[i]->neighbours = memcpy(copy->nodes[i]->neighbours,
+                                        g->nodes[i]->neighbours,
+                                        sizeof(int)*g->nodes[i]->len);
+        copy->nodes[i]->MCS_index = g->nodes[i]->MCS_index;
+        copy->nodes[i]->next = g->nodes[i]->next;
+        copy->nodes[i]->prev = g->nodes[i]->prev;
+
+        copy->ordering[i] = g->ordering[i];
         
     }
+
+    for (int i = 0; i < g->MCS->len; i++)
+    {
+        copy->MCS->heads[i] = g->MCS->heads[i];
+        g->MCS->tails[i] = g->MCS->tails[i];
+    }
+    
     return copy;
 }
 
-/* free all space used by graph */
 void graph_destroy(Graph g)
 {
     assert(g);
@@ -230,10 +382,13 @@ void graph_destroy(Graph g)
     }
     free(g->adjacency_matrix);
     free(g->nodes);
+    free(g->ordering);
+    free(g->MCS->heads);
+    free(g->MCS->tails);
+    free(g->MCS);
     free(g);
 }
 
-/* add an undirected edge to an existing graph */
 void graph_add_edge(Graph g, int u, int v)
 {
     if(node_invalid(g, u)) return;
@@ -284,8 +439,8 @@ int graph_eliminate_vertex(Graph g, int vertex) {
        to) */
     for (int i = 0; i < (current->d - 1); i++)
     {
-        /* add an edge to all other neighbours
-        if the edge is already present, the call
+        /* add an edge to all other neighbours.
+        If the edge is already present, the call
         returns immediately, thus no need to check
         */
         for (int j = i+1; j < current->d; j++)
@@ -298,17 +453,23 @@ int graph_eliminate_vertex(Graph g, int vertex) {
     return degree;
 }
 
-/* mark this vertex as included in a
-    mcs set
+/* Use this function instead of the elimination function
+    when doing MCS strategy
 */
 void graph_include_vertex(Graph g, int vertex) {
-    if (node_invalid(g, vertex)) return;
-    g->nodes[vertex]->in_set = 1;
+    /* If a vertex is deleted, all its neighbours
+        move up in the MCS lists by one index 
+    */
+    for (int i = 0; i < g->nodes[vertex]->len; i++)
+    {
+        int neighbour = g->nodes[vertex]->neighbours[i];
+        if (node_invalid(g, neighbour)) continue;
+        int current = g->nodes[neighbour]->MCS_index;
+        MCS_delete_node(g, neighbour);
+        MCS_add_node(g, neighbour, current+1);
+    }    
 }
 
-/* delete node vertex from the graph.
-    Note: this does not free its memory.
-*/
 void graph_delete_vertex(Graph g, int vertex) {
     if (node_invalid(g, vertex)) return;
     struct node_t* current = g->nodes[vertex];
@@ -325,35 +486,24 @@ void graph_delete_vertex(Graph g, int vertex) {
     g->m -= decrease;
 }
 
-/* return the number of vertices in the graph */
 int graph_vertex_count(Graph g)
 {
     return g->n;
 }
 
-/* return the number of vertices in the graph */
 int graph_edge_count(Graph g)
 {
     return g->m;
 }
 
-/* return the out-degree of a vertex
-    if the supplied node is deleted,
-    returns max int value
-*/
 int graph_vertex_degree(Graph g, int source)
 {
-    if (node_invalid(g, source)) return __INT_MAX__;
+    if (node_invalid(g, source)) return INT_MAX;
     return g->nodes[source]->d;
 }
 
-/* return the amount of fill-in edges to be added
-    if this vertex was eliminated. 
-    Returns max int value for deleted vertex.
-    Note: This function only works with undirected graphs.
-*/
 int graph_vertex_fillin(Graph g, int vertex) {
-    if (node_invalid(g, vertex)) return __INT_MAX__;
+    if (node_invalid(g, vertex)) return INT_MAX;
     int result = 0;
     struct node_t* current = g->nodes[vertex];
     /* for each neighbour of vertex but the last one
@@ -370,20 +520,11 @@ int graph_vertex_fillin(Graph g, int vertex) {
     return result;
 }
 
-/* return number of neighbours of vertex that
-    are in the provided set 
-*/
-int graph_vertex_cardinality(Graph g, int vertex, int* set, int set_len) {
+int graph_vertex_cardinality(Graph g, int vertex) {
     if (node_invalid(g, vertex) || g->nodes[vertex]->in_set) return -1;
-    int result = 0;
-    for (int i = 0; i < set_len; i++)
-    {
-        if (graph_has_edge(g, vertex, set[i])) result++;
-    }
-    return result;
+    return g->nodes[vertex]->MCS_index;
 }
 
-/* return 1 if edge (source, sink) exists), 0 otherwise */
 int graph_has_edge(Graph g, int source, int sink)
 {
     if (node_invalid(g, source) ||
@@ -392,11 +533,9 @@ int graph_has_edge(Graph g, int source, int sink)
     return g->adjacency_matrix[source][sink/8] & 1<<(7-sink%8);
 }
 
-/* return index of vertex with minimal value for
-    function f*/
 int graph_min_vertex(Graph g,
                      int (*f)(Graph g, int vertex)) {
-    int min_value = __INT_MAX__;
+    int min_value = INT_MAX;
     int min_index = 0;
     for (int i = 0; i < g->nodes_len; i++)
     {
@@ -410,39 +549,73 @@ int graph_min_vertex(Graph g,
     return min_index;
 }
 
-/* return the index of the vertex with minimal degree
-*/
 int graph_min_degree_index(Graph g) {
     return graph_min_vertex(g, graph_vertex_degree);
 }
 
-/* return the index of vertex that results in
-    minimal fill-in edges upon elimination */
 int graph_min_fillin_index(Graph g) {
     return graph_min_vertex(g, graph_vertex_fillin);
 }
 
-/* return index of the vertex that has 
-    most neighbours in a provided set
-*/
-int graph_max_cardinality_index(Graph g, int* set, int set_len) {
-    int max_value = -1;
-    int max_index = 0;
-    for (int i = g->nodes_len-1 ; i >= 0; i--)
-    {
-        int current = graph_vertex_cardinality(g, i, set, set_len);
-        if (current > max_value) {
-            max_index = i;
-            max_value = current;
-        }
-    }
-    return max_index;
+int graph_max_cardinality_index(Graph g) {
+    return g->MCS->heads[g->MCS->max_S]->id;
 }
 
-/* Print the graph in adjacency list format.
-    A "d" for the adjacency list of a vertex
-    signals that this vertex is deleted
-*/
+int graph_order_degree (Graph g) {
+  int size = graph_vertex_count(g);
+  int width = 0;
+  for (int i = 0; i < size; i++)
+  {
+    int best_node = graph_min_degree_index(g);
+    int current_width = graph_eliminate_vertex(g, best_node);
+    if (current_width > width) width = current_width;
+    g->ordering[i] = best_node;
+  }
+  return width;
+}
+
+int graph_order_fillin (Graph g) {
+  int size = graph_vertex_count(g);
+  int width = 0;
+  for (int i = 0; i < size; i++)
+  {
+    int best_node = graph_min_fillin_index(g);
+    int current_width = graph_eliminate_vertex(g, best_node);
+    if (current_width > width) width = current_width;
+    g->ordering[i] = best_node;
+  }
+  return width;  
+}
+
+int graph_order_mcs (Graph g) {
+  int size = graph_vertex_count(g);
+  int width = 0;
+  for (int i = size-1; i > 0; i--) {
+    int best_node = graph_max_cardinality_index(g);
+    g->ordering[i] = best_node;
+  }
+  /* calculate treewidth */
+  for (int i = 0; i < size; i++)
+  {
+    int current_width = graph_eliminate_vertex(g, g->ordering[i]);
+    if (current_width > width) width = current_width;
+  }  
+  return width;
+}
+
+char graph_ordering_plausible (Graph g) {
+    char* used = (char*)malloc(g->nodes_len);
+    memset(used, 0, g->nodes_len);
+    for (int i = 0; i < g->nodes_len; i++)
+    {
+        int index = g->ordering[i];
+        if (index == -1) return 0;
+        if (used[index]) return 0;
+        used[index] = 1;
+    }
+    return 1;
+}
+
 void graph_print(Graph g, FILE *stream){
     if (g == NULL) return;
     if (stream == NULL) return;

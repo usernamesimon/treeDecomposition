@@ -110,12 +110,14 @@ main (int argc, char **argv)
   float start, end;
   start = clock();
   Graph g = graph_import(inputpath);
+  Graph g1 = graph_copy(g);
   if(g==NULL) return 1;
   end = clock();
   float time_su = (end-start)/CLOCKS_PER_SEC;
   
+  graph_destroy(g);
   start = clock();
-  int width_d = graph_order_mcs(g);
+  int width_d = graph_order_mcs(g1);
   end = clock();
   float time_d = (end - start)/CLOCKS_PER_SEC;
   fprintf(stdout, "Time for setup: %f\n"
@@ -123,8 +125,9 @@ main (int argc, char **argv)
           "Width: %d\n"
           "Ordering plausible: %c",
            time_su, time_d, width_d,
-           graph_ordering_plausible(g));
-  graph_destroy(g);
+           graph_ordering_plausible(g1));
+  
+  graph_destroy(g1);
   
   //benchmark(inputpath, stdout);
   

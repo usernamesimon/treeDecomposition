@@ -16,25 +16,37 @@ struct node_t
         char in_set; /* true if the node is already in ordering */
         int* neighbours; /* list of neighbours for iterating purposes*/
         int len; /* size of neigbour_list */
-        int MCS_index; /* this node is contained in <g->MCS->heads[MCS_index]>*/
-        struct node_t *next; /* Next member of the MCS linked list */
-        struct node_t *prev; /* Previous member of MCS linked list */
+        int priority_index; /* this node is contained in <g->priority->heads[priority_index]>*/
+        struct node_t *next; /* Next member of the priority linked list */
+        struct node_t *prev; /* Previous member of priority linked list */
         
     };
 
-/* For maximum cardinality search we keep
-    an array of sets MCS_t where MCS_t->heads[j] is
-    a list of pointers to nodes which
-    have exactly j neighbours in the 
-    current <g->ordering>. Look at it
-    as an array of linked lists
-    of pointers to nodes in <g->nodes> */
-struct MCS_t {
+/*  To greatly improve performance, we keep track
+    of which nodes are to be selected next by updating
+    this structure, instead of calculating the best
+    node in each step.
+
+    
+    For the vertex degree method, a node with
+    degree j is in the list heads[j].
+
+    For the min-fill-in method, a node with j
+    fill-in edges produced is in the list heads[j].
+
+    For maximum cardinality search a nodes
+    which has exactly j neighbours in the 
+    list heads[j].
+    */
+struct Priority_t {
     struct node_t **heads;
     struct node_t **tails;
-    /* max_S is the biggest index i where
-        <MCS_t->heads[i]> is not empty */
-    int max_S;
+    /* max_ptr is the biggest index i where
+        <Priority_t->heads[i]> is not empty */
+    int max_ptr;
+    /* min_ptr is the smallest index i where
+        <Priority_t->heads[i]> is not empty */
+    int min_ptr;
     /* len is the size of the heads and tails
         arrays */
     int len;
@@ -67,7 +79,8 @@ struct graph
 
     int* ordering; /* holds the ordering produced by an elimination ordering*/
 
-    struct MCS_t *MCS; /* structure for maximum cardinality search */
+    struct Priority_t *priority; /* structure for determining the next node
+                                    to eliminate */
 };
 
 /* check if a node exists and is not deleted */
@@ -78,29 +91,42 @@ char node_invalid(Graph g, int node) {
     return 0;
 }
 
-/* add node g->nodes[node_index] to the MCS
+/* add node g->nodes[node_index] to the priority
     lists with set number index
 */
-void MCS_add_node(Graph g, int node_index, int index) {
+void priority_add_node(Graph g, int node_index, int index) {
     if (node_invalid(g, node_index)) return;
-    struct node_t *node = g->nodes[node_index];
-    if (g->MCS->tails[index])
+    /*  Grow array if necessary
+        This can happen if a node leads to a lot of 
+        fill-in edges when using that heuristic.
+    */
+    while (index > g->priority->len)
     {
-        g->MCS->tails[index]->next = node;
-        node->prev = g->MCS->tails[index];       
+        g->priority->len *= 2;
+        g->priority->heads = (struct node_t **)realloc(g->priority->heads,
+                                                        g->priority->len);
+        g->priority->tails = (struct node_t **)realloc(g->priority->tails,
+                                                        g->priority->len);
+    }
+    
+    struct node_t *node = g->nodes[node_index];
+    if (g->priority->tails[index])
+    {
+        g->priority->tails[index]->next = node;
+        node->prev = g->priority->tails[index];       
     } else
     {
-        g->MCS->heads[index] = node;
+        g->priority->heads[index] = node;
     }    
-    g->MCS->tails[index] = node;
-    if (index > g->MCS->max_S)
-        g->MCS->max_S = index;
+    g->priority->tails[index] = node;
+    if (index > g->priority->max_ptr)
+        g->priority->max_ptr = index;
 }
 
 /* remove node g->nodes[node_index] from the 
-    MCS lists
+    priority lists
 */
-void MCS_delete_node(Graph g, int node_index) {
+void priority_delete_node(Graph g, int node_index) {
     if (node_invalid(g, node_index)) return;
     struct node_t *node = g->nodes[node_index];
     if (node->prev)
@@ -109,22 +135,22 @@ void MCS_delete_node(Graph g, int node_index) {
     if (node->next)
         node->next->prev = node->prev;
 
-    if (node == g->MCS->heads[node->MCS_index]) {
-        g->MCS->heads[node->MCS_index] = node->next;
+    if (node == g->priority->heads[node->priority_index]) {
+        g->priority->heads[node->priority_index] = node->next;
         /* if this was the last node in the list
-            we need to decrease max_S
+            we need to decrease max_ptr
         */
         if (!node->next)
         {
-            while (!g->MCS->heads[(g->MCS->max_S)]) g->MCS->max_S--;
+            while (!g->priority->heads[(g->priority->max_ptr)]) g->priority->max_ptr--;
         }
     }
 
-    if (node == g->MCS->tails[node->MCS_index]) {
-        g->MCS->tails[node->MCS_index] = node->prev;
+    if (node == g->priority->tails[node->priority_index]) {
+        g->priority->tails[node->priority_index] = node->prev;
         
-        // max_S should have been corrected already
-        assert(g->MCS->tails[g->MCS->max_S]);
+        // max_ptr should have been corrected already
+        assert(g->priority->tails[g->priority->max_ptr]);
         
     }
 }
@@ -143,15 +169,16 @@ Graph graph_create(int n)
     assert(g->ordering);
     /* At most a node can be connected to all
         other nodes which could be in the ordering
-        potentially, therefore n-1 is the maximum for MCS */
-    g->MCS = malloc(sizeof(struct MCS_t));
-    assert(g->MCS);
-    g->MCS->len = n-1;
-    g->MCS->max_S = 0;
-    g->MCS->heads = malloc(sizeof(struct node_t*)*g->MCS->len);
-    assert(g->MCS->heads);
-    g->MCS->tails = malloc(sizeof(struct node_t*)*g->MCS->len);
-    assert(g->MCS->tails);
+        potentially, therefore n-1 is the maximum for priority */
+    g->priority = malloc(sizeof(struct Priority_t));
+    assert(g->priority);
+    g->priority->len = n-1;
+    g->priority->max_ptr = 0;
+    g->priority->min_ptr = g->priority->len - 1;
+    g->priority->heads = malloc(sizeof(struct node_t*)*g->priority->len);
+    assert(g->priority->heads);
+    g->priority->tails = malloc(sizeof(struct node_t*)*g->priority->len);
+    assert(g->priority->tails);
     
     
     
@@ -177,17 +204,17 @@ Graph graph_create(int n)
         g->nodes[i]->neighbours = malloc(sizeof(int));
         assert(g->nodes[i]->neighbours);
         g->nodes[i]->len = 1;
-        g->nodes[i]->MCS_index = 0;
+        g->nodes[i]->priority_index = 0;
         g->nodes[i]->next = NULL;
         g->nodes[i]->prev = NULL;
         
         g->ordering[i] = -1;        
     }
 
-    for (int i = 0; i < g->MCS->len; i++)
+    for (int i = 0; i < g->priority->len; i++)
     {
-        g->MCS->heads[i] = NULL;
-        g->MCS->tails[i] = NULL;
+        g->priority->heads[i] = NULL;
+        g->priority->tails[i] = NULL;
     }
     
     /* There is no ordering yet, so every
@@ -195,7 +222,7 @@ Graph graph_create(int n)
     */
     for (int i = 0; i < g->n; i++)
     {
-        MCS_add_node(g, i, 0);
+        priority_add_node(g, i, 0);
     }
     
 
@@ -318,14 +345,15 @@ Graph graph_copy(Graph g){
     copy->ordering = malloc(sizeof(int)*n);
     assert(copy->ordering);
     
-    copy->MCS = malloc(sizeof(struct MCS_t));
-    assert(copy->MCS);
-    copy->MCS->len = g->MCS->len;
-    copy->MCS->max_S = g->MCS->max_S;
-    copy->MCS->heads = malloc(sizeof(struct node_t*)*g->MCS->len);
-    assert(copy->MCS->heads);
-    copy->MCS->tails = malloc(sizeof(struct node_t*)*g->MCS->len);
-    assert(copy->MCS->tails);
+    copy->priority = malloc(sizeof(struct Priority_t));
+    assert(copy->priority);
+    copy->priority->len = g->priority->len;
+    copy->priority->max_ptr = g->priority->max_ptr;
+    copy->priority->min_ptr = g->priority->min_ptr;
+    copy->priority->heads = malloc(sizeof(struct node_t*)*g->priority->len);
+    assert(copy->priority->heads);
+    copy->priority->tails = malloc(sizeof(struct node_t*)*g->priority->len);
+    assert(copy->priority->tails);
     
     /* calculate the size of the adjacency matrix.
         We need one more byte if the number of 
@@ -352,18 +380,31 @@ Graph graph_copy(Graph g){
         copy->nodes[i]->neighbours = memcpy(copy->nodes[i]->neighbours,
                                         g->nodes[i]->neighbours,
                                         sizeof(int)*g->nodes[i]->len);
-        copy->nodes[i]->MCS_index = g->nodes[i]->MCS_index;
-        copy->nodes[i]->next = g->nodes[i]->next;
-        copy->nodes[i]->prev = g->nodes[i]->prev;
-
+        copy->nodes[i]->priority_index = g->nodes[i]->priority_index;
+        
+        /* If the original has next/prev link to the node
+            with the same id in the copy, otherwise
+            to NULL pointer
+        */
+        if (g->nodes[i]->next) {
+            copy->nodes[i]->next = copy->nodes[g->nodes[i]->next->id];
+        } else copy->nodes[i]->next = NULL;
+        if (g->nodes[i]->prev) {
+            copy->nodes[i]->prev = copy->nodes[g->nodes[i]->prev->id];
+        } else copy->nodes[i]->prev = NULL;
         copy->ordering[i] = g->ordering[i];
         
     }
 
-    for (int i = 0; i < g->MCS->len; i++)
+    /* Link to new heads and tails if they were present in original*/
+    for (int i = 0; i < g->priority->len; i++)
     {
-        copy->MCS->heads[i] = g->MCS->heads[i];
-        g->MCS->tails[i] = g->MCS->tails[i];
+        if (g->priority->heads[i]) {
+            copy->priority->heads[i] = copy->nodes[g->priority->heads[i]->id];
+        } else copy->priority->heads[i] = NULL;
+        if (g->priority->tails[i]) {
+            copy->priority->tails[i] = copy->nodes[g->priority->tails[i]->id];
+        } else copy->priority->tails[i] = NULL;
     }
     
     return copy;
@@ -378,14 +419,14 @@ void graph_destroy(Graph g)
     {
         free(g->nodes[i]->neighbours);
         free(g->nodes[i]);
-        //free(g->adjacency_matrix[i]);
+        free(g->adjacency_matrix[i]);
     }
     free(g->adjacency_matrix);
     free(g->nodes);
     free(g->ordering);
-    free(g->MCS->heads);
-    free(g->MCS->tails);
-    free(g->MCS);
+    free(g->priority->heads);
+    free(g->priority->tails);
+    free(g->priority);
     free(g);
 }
 
@@ -458,15 +499,15 @@ int graph_eliminate_vertex(Graph g, int vertex) {
 */
 void graph_include_vertex(Graph g, int vertex) {
     /* If a vertex is deleted, all its neighbours
-        move up in the MCS lists by one index 
+        move up in the priority lists by one index 
     */
     for (int i = 0; i < g->nodes[vertex]->len; i++)
     {
         int neighbour = g->nodes[vertex]->neighbours[i];
         if (node_invalid(g, neighbour)) continue;
-        int current = g->nodes[neighbour]->MCS_index;
-        MCS_delete_node(g, neighbour);
-        MCS_add_node(g, neighbour, current+1);
+        int current = g->nodes[neighbour]->priority_index;
+        priority_delete_node(g, neighbour);
+        priority_add_node(g, neighbour, current+1);
     }    
 }
 
@@ -522,7 +563,7 @@ int graph_vertex_fillin(Graph g, int vertex) {
 
 int graph_vertex_cardinality(Graph g, int vertex) {
     if (node_invalid(g, vertex) || g->nodes[vertex]->in_set) return -1;
-    return g->nodes[vertex]->MCS_index;
+    return g->nodes[vertex]->priority_index;
 }
 
 int graph_has_edge(Graph g, int source, int sink)
@@ -558,7 +599,7 @@ int graph_min_fillin_index(Graph g) {
 }
 
 int graph_max_cardinality_index(Graph g) {
-    return g->MCS->heads[g->MCS->max_S]->id;
+    return g->priority->heads[g->priority->max_ptr]->id;
 }
 
 int graph_order_degree (Graph g) {

@@ -14,8 +14,8 @@ struct node_t
         int d;          /* number of successors */
         char is_deleted; /* deletion flag */
         char in_set; /* true if the node is already in ordering */
-        int* neighbours; /* list of neighbours for iterating purposes*/
-        int len; /* size of neigbour_list */
+        struct node_t **neighbours; /* array of neighbour pointers for iterating purposes*/
+        int len; /* size of neigbour array */
         int priority_index; /* this node is contained in <g->priority->heads[priority_index]>*/
         struct node_t *next; /* Next member of the priority linked list */
         struct node_t *prev; /* Previous member of priority linked list */
@@ -52,11 +52,12 @@ struct Priority_t {
     int len;
 };
 
+enum strategy {unspecified, degree, fillin, mcs};
 struct graph
 {
     int n; /* number of vertices */
     int m; /* number of edges */
-    struct node_t **nodes; /* holds meta information of each vertex*/
+    struct node_t **nodes; /* actual array of vertex pointers */
 
     /* if a vertex is deleted, <n> decreases
         but <nodes_len> stays the same. Since
@@ -81,6 +82,7 @@ struct graph
 
     struct Priority_t *priority; /* structure for determining the next node
                                     to eliminate */
+    enum strategy_t *strategy;
 };
 
 /* check if a node exists and is not deleted */
@@ -104,23 +106,33 @@ void priority_add_node(Graph g, int node_index, int index) {
     {
         g->priority->len *= 2;
         g->priority->heads = (struct node_t **)realloc(g->priority->heads,
-                                                        g->priority->len);
+                                sizeof(struct node_t*)* g->priority->len);
         g->priority->tails = (struct node_t **)realloc(g->priority->tails,
-                                                        g->priority->len);
+                                sizeof(struct node_t*)* g->priority->len);
     }
     
     struct node_t *node = g->nodes[node_index];
+    /* if list with index <index> is not empty */
     if (g->priority->tails[index])
     {
+        /* link in new node*/
+        node->prev = g->priority->tails[index];
+        //assert(!g->priority->tails[index]->next);
         g->priority->tails[index]->next = node;
-        node->prev = g->priority->tails[index];       
+        g->priority->tails[index] = node;
     } else
     {
-        g->priority->heads[index] = node;
-    }    
-    g->priority->tails[index] = node;
+        /* otherwise make this node the new head */
+        g->priority->tails[index] = g->priority->heads[index] = node;
+    }
+    
+    /* check if we have to update min and max pointers */
     if (index > g->priority->max_ptr)
         g->priority->max_ptr = index;
+    if (index < g->priority->min_ptr)
+        g->priority->min_ptr = index;
+    node->priority_index = index;
+    assert(node->next!=node);
 }
 
 /* remove node g->nodes[node_index] from the 
@@ -128,6 +140,8 @@ void priority_add_node(Graph g, int node_index, int index) {
 */
 void priority_delete_node(Graph g, int node_index) {
     if (node_invalid(g, node_index)) return;
+
+    /* unlink the node */
     struct node_t *node = g->nodes[node_index];
     if (node->prev)
         node->prev->next = node->next;
@@ -135,24 +149,32 @@ void priority_delete_node(Graph g, int node_index) {
     if (node->next)
         node->next->prev = node->prev;
 
+    /*  if this node was the head, we need to set
+        a new one */
     if (node == g->priority->heads[node->priority_index]) {
         g->priority->heads[node->priority_index] = node->next;
-        /* if this was the last node in the list
-            we need to decrease max_ptr
+        
+        /*  if this was the last node in the list
+            we may need to decrease max_ptr and
+            increase min_ptr
         */
         if (!node->next)
         {
             while (!g->priority->heads[(g->priority->max_ptr)]) g->priority->max_ptr--;
+            while (!g->priority->heads[(g->priority->min_ptr)]) g->priority->min_ptr++;
         }
     }
 
+    /* if this was the tail we need to set a new one */
     if (node == g->priority->tails[node->priority_index]) {
         g->priority->tails[node->priority_index] = node->prev;
         
-        // max_ptr should have been corrected already
+        // max_ptr and min_ptr should have been corrected already
         assert(g->priority->tails[g->priority->max_ptr]);
+        assert(g->priority->tails[g->priority->min_ptr]);
         
     }
+    node->next = node->prev = NULL;
 }
 
 Graph graph_create(int n)
@@ -174,11 +196,13 @@ Graph graph_create(int n)
     assert(g->priority);
     g->priority->len = n-1;
     g->priority->max_ptr = 0;
-    g->priority->min_ptr = g->priority->len - 1;
+    g->priority->min_ptr = g->priority->len-1;
     g->priority->heads = malloc(sizeof(struct node_t*)*g->priority->len);
     assert(g->priority->heads);
     g->priority->tails = malloc(sizeof(struct node_t*)*g->priority->len);
     assert(g->priority->tails);
+
+    g->strategy = unspecified;
     
     
     
@@ -201,7 +225,7 @@ Graph graph_create(int n)
         g->nodes[i]->d = 0;
         g->nodes[i]->is_deleted = 0;
         g->nodes[i]->in_set = 0;
-        g->nodes[i]->neighbours = malloc(sizeof(int));
+        g->nodes[i]->neighbours = malloc(sizeof(struct node_t*));
         assert(g->nodes[i]->neighbours);
         g->nodes[i]->len = 1;
         g->nodes[i]->priority_index = 0;
@@ -215,16 +239,7 @@ Graph graph_create(int n)
     {
         g->priority->heads[i] = NULL;
         g->priority->tails[i] = NULL;
-    }
-    
-    /* There is no ordering yet, so every
-        node is in the 0 set 
-    */
-    for (int i = 0; i < g->n; i++)
-    {
-        priority_add_node(g, i, 0);
-    }
-    
+    }   
 
     return g;
 }
@@ -354,6 +369,8 @@ Graph graph_copy(Graph g){
     assert(copy->priority->heads);
     copy->priority->tails = malloc(sizeof(struct node_t*)*g->priority->len);
     assert(copy->priority->tails);
+
+    copy->strategy = g->strategy;
     
     /* calculate the size of the adjacency matrix.
         We need one more byte if the number of 
@@ -375,7 +392,7 @@ Graph graph_copy(Graph g){
         copy->nodes[i]->is_deleted = g->nodes[i]->is_deleted;
         copy->nodes[i]->in_set = g->nodes[i]->in_set;
         copy->nodes[i]->len = g->nodes[i]->len;
-        copy->nodes[i]->neighbours = (int*)malloc(sizeof(int)*copy->nodes[i]->len);
+        copy->nodes[i]->neighbours = (struct node_t**)malloc(sizeof(struct node_t*)*copy->nodes[i]->len);
         assert(copy->nodes[i]->neighbours);
         copy->nodes[i]->neighbours = memcpy(copy->nodes[i]->neighbours,
                                         g->nodes[i]->neighbours,
@@ -430,39 +447,52 @@ void graph_destroy(Graph g)
     free(g);
 }
 
+/* resize the int array and fill with INT_MIN */
+void* realloc_neighbours(void* pBuffer, size_t oldSize, size_t newSize) {
+  void* pNew = realloc(pBuffer, newSize);
+  if ( newSize > oldSize && pNew ) {
+    size_t diff = newSize - oldSize;
+    void* pStart = ((char*)pNew) + oldSize;
+    memset(pStart, 0, diff);
+  }
+  return pNew;
+}
+
 void graph_add_edge(Graph g, int u, int v)
 {
-    if(node_invalid(g, u)) return;
-    if(node_invalid(g, v)) return;
-
     if (graph_has_edge(g, u, v)) return;
      
     g->adjacency_matrix[u][v/8] |= 1<<(7-v%8);
     g->adjacency_matrix[v][u/8] |= 1<<(7-u%8);
     struct node_t* source = g->nodes[u];
+    struct node_t* sink = g->nodes[v];
     /* do we need to grow the list? */
     while (source->d >= source->len)
     {
+        int oldsize = source->len;
         source->len *= 2;
         source->neighbours =
-            realloc(source->neighbours,
-                    sizeof(int) * (source->len));
+            realloc_neighbours(source->neighbours,
+                    sizeof(struct node_t*) * oldsize,
+                    sizeof(struct node_t*) * (source->len));
     }
 
     /* now add the new sink */
-    source->neighbours[source->d++] = v;
-    struct node_t* sink = g->nodes[v];
+    source->neighbours[source->d++] = sink;
+    
     /* do we need to grow the list? */
     while (sink->d >= sink->len)
     {
+        int oldsize = sink->len;
         sink->len *= 2;
         sink->neighbours =
-            realloc(sink->neighbours,
-                    sizeof(int) * (sink->len));
+            realloc_neighbours(sink->neighbours,
+                    sizeof(struct node_t*) * oldsize,
+                    sizeof(struct node_t*) * sink->len);
     }
 
     /* now add the new source */
-    sink->neighbours[sink->d++] = u;
+    sink->neighbours[sink->d++] = source;
     /* bump edge count */
     g->m++;
 }
@@ -475,20 +505,26 @@ int graph_eliminate_vertex(Graph g, int vertex) {
 
     struct node_t* current = g->nodes[vertex];
     int degree = current->d;
+    int found_outer = 0;
     /* for each neighbour of vertex but the last one
        (since there are no other neighbours to connect
        to) */
-    for (int i = 0; i < (current->d - 1); i++)
+    for (int i = 0; i < current->len && found_outer < degree - 1; i++)
     {
-        /* add an edge to all other neighbours.
-        If the edge is already present, the call
-        returns immediately, thus no need to check
+        /* add an edge to all other neighbours
         */
-        for (int j = i+1; j < current->d; j++)
+        int found_inner = i+1;
+        if (!current->neighbours[i]) continue;
+        if (node_invalid(g,current->neighbours[i]->id)) continue;
+        for (int j = i+1; j < current->len && found_inner < degree; j++)
         {
-            graph_add_edge(g, current->neighbours[i],
-             current->neighbours[j]);
-        }        
+            if (!current->neighbours[j]) continue;
+            if (node_invalid(g,current->neighbours[j]->id)) continue;
+            graph_add_edge(g, current->neighbours[i]->id,
+             current->neighbours[j]->id);
+            found_inner++;
+        }
+        found_outer++;        
     }
     graph_delete_vertex(g, vertex);
     return degree;
@@ -498,13 +534,15 @@ int graph_eliminate_vertex(Graph g, int vertex) {
     when doing MCS strategy
 */
 void graph_include_vertex(Graph g, int vertex) {
-    /* If a vertex is deleted, all its neighbours
+    /* If a vertex is included, all its neighbours
         move up in the priority lists by one index 
     */
-    for (int i = 0; i < g->nodes[vertex]->len; i++)
+    int found = 0;
+    for (int i = 0; i < g->nodes[vertex]->len && found < g->nodes[vertex]->d; i++)
     {
-        int neighbour = g->nodes[vertex]->neighbours[i];
+        int neighbour = g->nodes[vertex]->neighbours[i]->id;
         if (node_invalid(g, neighbour)) continue;
+        found++;
         int current = g->nodes[neighbour]->priority_index;
         priority_delete_node(g, neighbour);
         priority_add_node(g, neighbour, current+1);
@@ -514,19 +552,30 @@ void graph_include_vertex(Graph g, int vertex) {
 void graph_delete_vertex(Graph g, int vertex) {
     if (node_invalid(g, vertex)) return;
     struct node_t* current = g->nodes[vertex];
-    int decrease = 0;
     /* decrease the degree of all neighbours */
-    for (int i = 0; i < current->d ; i++)
+    int found = 0;
+    for (int i = 0; i < current->len && found < current->d; i++)
     {
-        if (node_invalid(g, current->neighbours[i])) continue;
-        g->nodes[current->neighbours[i]]->d--;
-        decrease++;
+        if (!current->neighbours[i]) continue;
+        if (node_invalid(g, current->neighbours[i]->id)) continue;
+        current->neighbours[i]->d--;
+        found++;
     }
+    assert(found == current->d);
     current->is_deleted = 1;
     g->n--;
-    g->m -= decrease;
+    g->m -= found;
 }
 
+/* void graph_delete_edge(Graph g, int vertex1, int vertex2) {
+    if(node_invalid(g, vertex1) ||
+        node_invalid(g, vertex2)) return;
+    
+    struct node_t *v1 = g->nodes[vertex1];
+    struct node_t *v2 = g->nodes[vertex2];
+
+
+} */
 int graph_vertex_count(Graph g)
 {
     return g->n;
@@ -550,12 +599,18 @@ int graph_vertex_fillin(Graph g, int vertex) {
     /* for each neighbour of vertex but the last one
        (since there are no other neighbours to check
        against) */
-    for (int i = 0; i < (current->d - 1); i++)
+    int found_outer = 0;
+    for (int i = 0; i < current->len && found_outer < current->d; i++)
     {
+        if (node_invalid(g, current->neighbours[i]->id)) continue;
         // check if all other neighbour are connected to it
-        for (int j = i+1; j < current->d; j++)
+        found_outer++;
+        int found_inner = 0;
+        for (int j = i+1; j < current->len && found_inner < current->d; j++)
         {
-            if (!graph_has_edge(g, g->nodes[i]->neighbours[i], g->nodes[i]->neighbours[j])) result++;
+            if (node_invalid(g, current->neighbours[j]->id)) continue;
+            found_inner++;
+            if (!graph_has_edge(g, g->nodes[i]->neighbours[i]->id, g->nodes[i]->neighbours[j]->id)) result++;
         }        
     }
     return result;
@@ -568,9 +623,6 @@ int graph_vertex_cardinality(Graph g, int vertex) {
 
 int graph_has_edge(Graph g, int source, int sink)
 {
-    if (node_invalid(g, source) ||
-        node_invalid(g, sink)) return 0;
-
     return g->adjacency_matrix[source][sink/8] & 1<<(7-sink%8);
 }
 
@@ -590,8 +642,49 @@ int graph_min_vertex(Graph g,
     return min_index;
 }
 
-int graph_min_degree_index(Graph g) {
-    return graph_min_vertex(g, graph_vertex_degree);
+/*  Initialise the priority lists with the
+    degrees of the nodes */
+void calc_initial_degrees(Graph g) {
+    g->strategy = degree;
+    for (int i = 0; i < g->nodes_len; i++)
+    {
+        if (node_invalid(g, i)) continue;
+        g->nodes[i]->priority_index = g->nodes[i]->d;
+        priority_add_node(g, i, g->nodes[i]->priority_index);
+    }    
+}
+
+/*  Initialise the priority lists with 0 for every node 
+    for later use with the mcs method */
+void calc_initial_mcs(Graph g) {
+    g->strategy = mcs;
+    /* There is no ordering yet, so every
+        node is in the 0 set 
+    */
+    for (int i = 0; i < g->n; i++)
+    {
+        priority_add_node(g, i, 0);
+    }
+}
+
+/*  Update the priority lists for min-degree method
+    upon eliminating the node g->nodes[node] 
+*/
+void update_degree(Graph g, int node) {
+    struct node_t *current = g->nodes[node];
+    int found = 0;
+    for (int i = 0; i < current->len && found < current->d; i++)
+    {
+        if(!current->neighbours[i]) continue;            
+        struct node_t *neighbour_ptr = current->neighbours[i];
+        int newdegree = neighbour_ptr->d - 1;
+        neighbour_ptr->d = newdegree;
+        found++;
+        priority_delete_node(g, neighbour_ptr->id);
+        priority_add_node(g, neighbour_ptr->id, newdegree);
+    }
+    assert(found == current->d);
+    
 }
 
 int graph_min_fillin_index(Graph g) {
@@ -605,12 +698,17 @@ int graph_max_cardinality_index(Graph g) {
 int graph_order_degree (Graph g) {
   int size = graph_vertex_count(g);
   int width = 0;
+  calc_initial_degrees(g);
   for (int i = 0; i < size; i++)
   {
-    int best_node = graph_min_degree_index(g);
-    int current_width = graph_eliminate_vertex(g, best_node);
+    struct node_t* best_node = g->priority->heads[g->priority->min_ptr];
+    /* decrease index of the neighbours in priority lists */
+    update_degree(g, best_node->id);
+    priority_delete_node(g, best_node->id);
+    int current_width = graph_eliminate_vertex(g, best_node->id);
+    update_degree(g, best_node->id);
     if (current_width > width) width = current_width;
-    g->ordering[i] = best_node;
+    g->ordering[i] = best_node->id;
   }
   return width;
 }
@@ -631,8 +729,9 @@ int graph_order_fillin (Graph g) {
 int graph_order_mcs (Graph g) {
   int size = graph_vertex_count(g);
   int width = 0;
+  calc_initial_mcs(g);
   for (int i = size-1; i > 0; i--) {
-    int best_node = graph_max_cardinality_index(g);
+    int best_node = g->priority->heads[g->priority->max_ptr]->id;
     g->ordering[i] = best_node;
   }
   /* calculate treewidth */
@@ -668,7 +767,7 @@ void graph_print(Graph g, FILE *stream){
         if (g->nodes[i]->is_deleted) fprintf(stream, " d");
         for (int j = 0; j < g->nodes[i]->d; j++)
         {
-            fprintf(stream, " %d", g->nodes[i]->neighbours[j]);
+            fprintf(stream, " %d", g->nodes[i]->neighbours[j]->id);
         }
         fprintf(stream, "\n");
     }    

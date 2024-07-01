@@ -115,19 +115,22 @@ main (int argc, char **argv)
   end = clock();
   float time_su = (end-start)/CLOCKS_PER_SEC;
   
-  graph_destroy(g);
+  graph_destroy(g1);
   start = clock();
-  int width_d = graph_order_mcs(g1);
+  int width_d = graph_order_degree(g);
   end = clock();
   float time_d = (end - start)/CLOCKS_PER_SEC;
   fprintf(stdout, "Time for setup: %f\n"
           "Time for execution: %f\n"
           "Width: %d\n"
-          "Ordering plausible: %c",
+          "Ordering plausible: %c\n"
+          "Vertices: %d, Edges: %d\n",
            time_su, time_d, width_d,
-           graph_ordering_plausible(g1));
+           graph_ordering_plausible(g),
+           graph_vertex_count(g),
+           graph_edge_count(g));
   
-  graph_destroy(g1);
+  graph_destroy(g);
   
   //benchmark(inputpath, stdout);
   

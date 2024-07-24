@@ -4,6 +4,7 @@ Something like
 mkdir build
 cd build
 cmake -S ..
+make
 should work.
 
 Generate graphs

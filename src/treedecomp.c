@@ -34,7 +34,7 @@ int benchmark (char* inputpath, FILE* resultfile) {
   float time_f = (end-start)/CLOCKS_PER_SEC;
 
   start = clock();  
-  int width_mcs = graph_order_fillin(g2);
+  int width_mcs = graph_order_mcs(g2);
   end = clock();
   float time_mcs = (end-start)/CLOCKS_PER_SEC;
 
@@ -106,16 +106,14 @@ main (int argc, char **argv)
   }
 
   //FILE* results = fopen("results.csv", "w");
-  print_file_header(stdout);
+  /* print_file_header(stdout);
   float start, end;
   start = clock();
   Graph g = graph_import(inputpath);
-  Graph g1 = graph_copy(g);
   if(g==NULL) return 1;
   end = clock();
   float time_su = (end-start)/CLOCKS_PER_SEC;
   
-  graph_destroy(g1);
   start = clock();
   int width_d = graph_order_degree(g);
   end = clock();
@@ -123,7 +121,7 @@ main (int argc, char **argv)
   fprintf(stdout, "Time for setup: %f\n"
           "Time for execution: %f\n"
           "Width: %d\n"
-          "Ordering plausible: %c\n"
+          "Ordering plausible: %d\n"
           "Vertices: %d, Edges: %d\n",
            time_su, time_d, width_d,
            graph_ordering_plausible(g),
@@ -131,8 +129,8 @@ main (int argc, char **argv)
            graph_edge_count(g));
   
   graph_destroy(g);
-  
-  //benchmark(inputpath, stdout);
+   */
+  benchmark(inputpath, stdout);
   
   
   return 0;

@@ -85,7 +85,7 @@ struct graph
     /* if a vertex is deleted, <n> decreases
         but <nodes_len> stays the same. Since
         deleting a node is simply setting a
-        flag, the valid entries in nodes are
+        flag, the valid entries in <nodes> are
         not necessarily consecutive. Therefore
         iterations over nodes require <nodes_len>
         and checking for the deletion flag.
@@ -210,7 +210,7 @@ int number_of_set_bits(char *ch_pointer, int size)
 
     for (int k = 0; k < size%4; k++)
     {
-        uint8_t byte = pointer[j+k];
+        uint8_t byte = ch_pointer[4*j+k];
         result += NIBBLE_LOOKUP[byte & 0x0F];
         byte = byte >> 4;
         result += NIBBLE_LOOKUP[byte];
@@ -227,7 +227,7 @@ int get_next_bit_index(char *adjacency_list, int start_index, int size)
 {
     int work = start_index / 8;
     // get next not empty byte
-    while (adjacency_list[work] == 0 && work < size)
+    while (work < size && adjacency_list[work] == 0)
         work++;
     // no next neighbour found
     if (work >= size)
@@ -242,7 +242,7 @@ int get_next_bit_index(char *adjacency_list, int start_index, int size)
     */
     work++;
     // get next not empty byte
-    while (adjacency_list[work] == 0 && work < size)
+    while (work < size && adjacency_list[work] == 0)
         work++;
     // no next neighbour found
     if (work >= size)
@@ -277,7 +277,7 @@ void priority_add_node(Graph g, int node_index, int index)
         This can happen if a node leads to a lot of
         fill-in edges when using that heuristic.
     */
-    while (index > g->priority->len)
+    while (index >= g->priority->len)
     {
         size_t newsize = g->priority->len * 2;
         g->priority->heads = (struct node_t **)realloc_zero(
@@ -309,7 +309,7 @@ void priority_add_node(Graph g, int node_index, int index)
     if (index < g->priority->min_ptr)
         g->priority->min_ptr = index;
     node->priority_index = index;
-    assert(node->next != node);
+    //assert(node->next != node);
 }
 
 /* remove node g->nodes[node_index] from the
@@ -342,9 +342,9 @@ void priority_delete_node(Graph g, int node_index)
         */
         if (!node->next)
         { 
-            while (!g->priority->heads[(g->priority->max_ptr)])
+            while (g->priority->max_ptr >= 0 && !g->priority->heads[(g->priority->max_ptr)])
                 g->priority->max_ptr--;
-            while (!g->priority->heads[(g->priority->min_ptr)])
+            while (g->priority->min_ptr < g->priority->len && !g->priority->heads[(g->priority->min_ptr)])
                 g->priority->min_ptr++;
         }
     }
@@ -355,8 +355,6 @@ void priority_delete_node(Graph g, int node_index)
         g->priority->tails[node->priority_index] = node->prev;
 
         // max_ptr and min_ptr should have been corrected already
-        assert(g->priority->tails[g->priority->max_ptr]);
-        assert(g->priority->tails[g->priority->min_ptr]);
     }
     node->next = node->prev = NULL;
 }
@@ -364,27 +362,32 @@ void priority_delete_node(Graph g, int node_index)
 Graph graph_create(int n)
 {
     Graph g = malloc(sizeof(struct graph));
-    assert(g);
+    if(!g) return NULL;
     g->n = n;
     g->m = 0;
     g->nodes = malloc(sizeof(struct node_t *) * n);
-    assert(g->nodes);
+    if(!g->nodes) {
+        free(g); return NULL;}
     g->nodes_len = n;
     g->adjacency_matrix = malloc(sizeof(char *) * n);
     g->ordering = malloc(sizeof(int) * n);
-    assert(g->ordering);
+    if(!g->ordering) {
+        free(g->nodes); free(g); return NULL; }
     /* At most a node can be connected to all
         other nodes which could be in the ordering
         potentially, therefore n-1 is the maximum for priority */
     g->priority = malloc(sizeof(struct Priority_t));
-    assert(g->priority);
+    if(!g->priority) {
+        free(g->ordering); free(g->nodes); free(g); return NULL; }
     g->priority->len = n;
     g->priority->max_ptr = 0;
     g->priority->min_ptr = INT_MAX;
     g->priority->heads = malloc(sizeof(struct node_t *) * g->priority->len);
-    assert(g->priority->heads);
+    if(!g->priority->heads) {
+        free(g->priority); free(g->ordering); free(g->nodes); free(g); return NULL; }
     g->priority->tails = malloc(sizeof(struct node_t *) * g->priority->len);
-    assert(g->priority->tails);
+    if(!g->priority->tails) {
+        free(g->priority->heads); free(g->priority); free(g->ordering); free(g->nodes); free(g); return NULL; }
 
     // g->strategy = unspecified;
 
@@ -400,11 +403,11 @@ Graph graph_create(int n)
     for (int i = 0; i < n; i++)
     {
         g->adjacency_matrix[i] = (char *)aligned_alloc(32, size);
-        assert(g->adjacency_matrix[i]);
+        if(!g->adjacency_matrix[i]) return NULL;
         memset(g->adjacency_matrix[i], 0, size);
 
         g->nodes[i] = malloc(sizeof(struct node_t));
-        assert(g->nodes[i]);
+        if(!g->nodes[i]) return NULL;
         g->nodes[i]->id = i;
         g->nodes[i]->degree = 0;
         g->nodes[i]->is_deleted = 0;
@@ -425,7 +428,7 @@ Graph graph_create(int n)
     return g;
 }
 
-Graph graph_import(char *inputpath)
+Graph graph_import(FILE *fstream)
 {
 
     /* get the size of the graph */
@@ -433,15 +436,11 @@ Graph graph_import(char *inputpath)
     char *line = NULL;
     size_t linelen = 0;
 
-    // open the file
-    FILE *fptr;
-    fptr = fopen(inputpath, "r");
-    if (fptr == NULL)
+    if (fstream == NULL)
     {
-        fprintf(stderr, "Not able to open file %s\n", inputpath);
         return NULL;
     }
-    if (getline(&line, &linelen, fptr) < 0)
+    if (getline(&line, &linelen, fstream) < 0)
     {
         // no point in continuing if we could not read
         free(line);
@@ -470,20 +469,18 @@ Graph graph_import(char *inputpath)
     // fprintf(stdout, "Number of vertices: %d\n", n);
 
     Graph g = graph_create(n);
-    assert(g);
+    if(!g) return NULL;
 
     // populate the adjacency lists of each node
     for (int i = 0; i < g->n; i++)
     {
         // get the next line from file
-        if (getline(&line, &linelen, fptr) < 0)
+        if (getline(&line, &linelen, fstream) < 0)
         {
             // unexpected EOF etc.
             fprintf(stderr, "Error parsing the adjacency list for node %d\n", i);
             graph_destroy(g);
             free(line);
-            if (fptr != NULL)
-                fclose(fptr);
             return NULL;
         }
         // split line into tokens and convert to int
@@ -498,23 +495,23 @@ Graph graph_import(char *inputpath)
             {
                 fprintf(stderr, "Conversion error\n");
                 graph_destroy(g);
-                if (fptr != NULL)
-                    fclose(fptr);
                 return NULL;
             }
-            assert(node == i);
+            //assert(node == i);
             tok = strtok(NULL, " ");
         }
         while (tok != NULL)
         {
-            assert(neighbour_count < n);
+            if(neighbour_count > n) {
+                fprintf(stderr, "Error importing: too many neighbours\n");
+                graph_destroy(g);
+                return NULL;
+            };
             int neighbour;
             if (sscanf(tok, "%d", &neighbour) != 1)
             {
                 fprintf(stderr, "Conversion error\n");
                 graph_destroy(g);
-                if (fptr != NULL)
-                    fclose(fptr);
                 return NULL;
             }
             neighbour_count++;
@@ -523,50 +520,48 @@ Graph graph_import(char *inputpath)
             tok = strtok(NULL, " ");
         }
     }
-    if (fptr != NULL)
-        fclose(fptr);
     free(line);
     return g;
 }
 
 Graph graph_copy(Graph g)
 {
-    assert(g);
-    assert(g->nodes);
+    if(!g) return NULL;
+    if(!g->nodes) return NULL;
 
     Graph copy = malloc(sizeof(struct graph));
-    assert(copy);
+    if(!copy) return NULL;
     int n = g->nodes_len;
     copy->n = g->n;
     copy->m = g->m;
     copy->nodes = malloc(sizeof(struct node_t *) * n);
-    assert(copy->nodes);
+    if(!copy->nodes) return NULL;
     copy->nodes_len = g->nodes_len;
     copy->adjacency_matrix = malloc(sizeof(char *) * g->n);
     copy->adjacency_size = g->adjacency_size;
     copy->ordering = malloc(sizeof(int) * n);
-    assert(copy->ordering);
+    if(!copy->ordering) return NULL;
 
     copy->priority = malloc(sizeof(struct Priority_t));
-    assert(copy->priority);
+    if(!copy->priority) return NULL;
     copy->priority->len = g->priority->len;
     copy->priority->max_ptr = g->priority->max_ptr;
     copy->priority->min_ptr = g->priority->min_ptr;
     copy->priority->heads = malloc(sizeof(struct node_t *) * g->priority->len);
-    assert(copy->priority->heads);
+    if(!copy->priority->heads) return NULL;
     copy->priority->tails = malloc(sizeof(struct node_t *) * g->priority->len);
-    assert(copy->priority->tails);
+    if(!copy->priority->tails) return NULL;
 
     // copy->strategy = g->strategy;
 
     for (int i = 0; i < n; i++)
     {
         copy->adjacency_matrix[i] = (char *)aligned_alloc(32, copy->adjacency_size);
-        assert(copy->adjacency_matrix[i]);
+        if(!copy->adjacency_matrix[i]) return NULL;
         memcpy(copy->adjacency_matrix[i], g->adjacency_matrix[i], copy->adjacency_size);
 
         copy->nodes[i] = malloc(sizeof(struct node_t));
-        assert(copy->nodes[i]);
+        if(!copy->nodes[i]) return NULL;
         copy->nodes[i]->id = g->nodes[i]->id;
         copy->nodes[i]->degree = g->nodes[i]->degree;
         copy->nodes[i]->is_deleted = g->nodes[i]->is_deleted;
@@ -614,7 +609,7 @@ Graph graph_copy(Graph g)
 
 void graph_destroy(Graph g)
 {
-    assert(g);
+    if(!g) return;
     int i;
 
     for (i = 0; i < g->nodes_len; i++)
@@ -850,7 +845,7 @@ void node_update_priority_mcs(Graph g, int vertex)
     /* If a vertex is included, all its neighbours
         move up in the priority lists by one index
     */
-    assert(!g->nodes[vertex]->in_set);
+    //assert(!g->nodes[vertex]->in_set);
     for (int i = 0; i < g->nodes_len; i++)
     {
         if (!graph_has_edge(g, vertex, i))
@@ -882,8 +877,7 @@ int node_update_priority_fillin_and_eliminate_vertex(Graph g, int vertex, char *
     for (int i = 0; i < degree; i++)
     {
 
-        if (node_invalid(g, neighbour))
-            assert(0);
+        if (node_invalid(g, neighbour)) return -1;
 
         memset(vertex_minus_neighbour, 0, g->adjacency_size);
         memset(neighbour_minus_vertex, 0, g->adjacency_size);
@@ -978,7 +972,7 @@ int node_update_priority_fillin_and_eliminate_vertex(Graph g, int vertex, char *
         if (decrease > 0)
         {
             int new_priority = g->nodes[neighbour]->priority_index - decrease;
-            assert(new_priority >= 0);
+            //assert(new_priority >= 0);
             priority_delete_node(g, neighbour);
             priority_add_node(g, neighbour, new_priority);
         }
@@ -1033,6 +1027,10 @@ int graph_order_fillin(Graph g)
             g, best_node->id, common, vertex_minus_neighbour,
             neighbour_minus_vertex, neighbour1_minus_neighbour2,
             neighbour2_minus_neighbour1);
+        if (current_width < 0) {
+            fprintf(stderr, "There was an error calculating current width\n");
+            return -1;
+        }
         if (current_width > width)
             width = current_width;
         g->ordering[i] = best_node->id;
@@ -1049,6 +1047,8 @@ int graph_order_fillin(Graph g)
     free(common);
     free(vertex_minus_neighbour);
     free(neighbour_minus_vertex);
+    free(neighbour1_minus_neighbour2);
+    free(neighbour2_minus_neighbour1);
     return width;
 }
 
@@ -1113,4 +1113,18 @@ void graph_print(Graph g, FILE *stream)
         }
         fprintf(stream, "\n");
     }
+}
+
+void graph_print_ordering(Graph g, FILE *stream) {
+    /* Check if ordering was already calculated 
+        (entries are initialized to -1)
+    */
+    if (g->ordering[0] < 0) return;
+
+    fprintf(stream, "%d", g->ordering[0]);
+    for (int i = 1; i < g->nodes_len; i++)
+    {
+        fprintf(stream, " %d", g->ordering[i]);
+    }
+    
 }

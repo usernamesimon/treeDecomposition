@@ -8,7 +8,7 @@ typedef struct graph *Graph;
 Graph graph_create(int n);
 
 /* import a graph from a file in adjacency list format */
-Graph graph_import(char* inputpath);
+Graph graph_import(FILE *fstream);
 
 /* copy a graph*/
 Graph graph_copy(Graph g);
@@ -48,7 +48,12 @@ int graph_order_mcs (Graph g);
 char graph_ordering_plausible (Graph g);
 
 /* Print the graph in adjacency list format.
-    A "degree" for the adjacency list of a vertex
+    A "d" for the adjacency list of a vertex
     signals that this vertex is deleted
 */
 void graph_print(Graph g, FILE *stream);
+
+/* Print the elimination ordering of a graph
+    if it has been calculated already
+*/
+void graph_print_ordering(Graph g, FILE *stream);

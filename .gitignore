@@ -54,3 +54,6 @@ dkms.conf
 # build folder, python environment
 build/*
 venv/*
+
+# data
+data/*

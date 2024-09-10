@@ -133,6 +133,12 @@ main (int argc, char **argv)
     /* Open input file list and create result file */
     FILE* results = fopen("results.csv", "a");
     if (results == NULL) {perror("Error opening results file"); exit(1);}
+    /* Check if appending or need to print header */
+    fseek (results, 0, SEEK_END);
+    long size = ftell(results);
+    if (0 == size) {
+      print_file_header(results);
+    }
     FILE* inputfiles = fopen(inputpath, "r");
     if (inputfiles == NULL) {perror("Error opening input file list file"); exit(1);}
 

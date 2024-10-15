@@ -1,4 +1,3 @@
-#include "treedecomp.h"
 #include "graph.h"
 #include <ctype.h>
 #include <stdio.h>
@@ -9,6 +8,8 @@
 #include <string.h>
 
 #define FILENAME_MAX_LENGTH 50
+
+const char* STRATEGY[] = {"Unspecified", "Min-Degree", "Maximum-Cardinality-Search", "Min-Fill-in-edges"};
 
 char *optarg;
 int optind, opterr, optopt;
@@ -54,59 +55,83 @@ int benchmark (char* name, FILE* inputfile, FILE* resultfile) {
   return 0;
 }
 
-typedef enum method {degree, cardinality, fillin} method;
-const char* METHOD[] = {"Min-Degree", "Maximum-Cardinality-Search", "Min-Fill-in-edges"};
+typedef enum mode {undefined, eo, td, conv, list} mode;
 int
 main (int argc, char **argv)
 {
   char *inputpath = NULL;
-  char usagestring[] = "usage: treedecomp [-h] [-D|C|F] [-s filepath] [-f folderpath]\n\n"
+  char *eo_file = NULL;
+  char usagestring[] = "usage: treedecomp [-h] [-D|C|F] [-o|t|l] [-c eo_filepath] filepath\n\n"
   "Calculate tree decomposition of a provided graph or graphs\n\n"
   "options:\n"
   "\t-h\tdisplay this message\n"
-  "\t-s filepath\tdo a tree decomposition of a single graph provided by filepath\n"
-  "\t-l listfile\tdo a benchmark of a list of graphs (results of size and time in results.csv, no actual decomposition for each graph is saved)\n"
-  "\t-D\tuse the min-degree heuristic (only for single graph mode)\n"
-  "\t-C\tuse the max-cardinality heuristic (only for single graph mode)\n"
-  "\t-F\tuse the min-fill-in heuristic (only for single graph mode)\n";
-  int listmode = 0;
+  "\t-o\tcreate an elimination ordering (EO) of a single graph provided by <filepath>\n"
+  "\t-t\tcreate a tree decomposition of a single graph provided by <filepath>\n"
+  "\t-l\tdo a benchmark of elimination orderings of a list of graphs declared in <filepath> (results of "
+  "size and time in results.csv, no actual ordering for each graph is saved)\n"
+  "\t-c eo_filepath\tdo an elimination ordering to tree-decomposition conversion with EO provided in"
+  " <eo_filepath> and the graph provided in <filepath>\n"
+  "\t-v\tuse verbose printing\n"
+  "\t-D\tuse the min-degree heuristic when creating an elimination ordering\n"
+  "\t-C\tuse the max-cardinality heuristic when creating an elimination ordering\n"
+  "\t-F\tuse the min-fill-in heuristic when creating an elimination ordering\n";
   int index;
   int c;
-  method mode = degree;
-
+  strategy heuristic = degree;
+  mode mode  = undefined;
+  int verbose_printing = 0;
+  
   opterr = 0;
 
 
-  while ((c = getopt (argc, argv, "s:l:hDCF")) != -1)
+  while ((c = getopt (argc, argv, "otlc:hvDCF")) != -1)
     switch (c)
       {
       case 'l':
-        if (inputpath != NULL) {
-          fprintf(stdout, 
-                  "Ignoring Single file as folder was provided\n");
-        }
-        inputpath = optarg;
-        listmode = 1;
+        if(mode!=undefined) {
+          fprintf(stderr, 
+                  "Error: Can only use one of these options [-o -t -l -c]\n");
+          exit(1);
+        } else mode = list;
         break;
-      case 's':
-        if(listmode==1) {
-          fprintf(stdout, 
-                  "Ignoring Single file as folder was provided\n");
-        } else inputpath = optarg;
-
+      case 'o':
+        if(mode!=undefined) {
+          fprintf(stderr, 
+                  "Error: Can only use one of these options [-o -t -l -c]\n");
+          exit(1);
+        } else mode = eo;
+        break;
+      case 't':
+        if(mode!=undefined) {
+          fprintf(stderr, 
+                  "Error: Can only use one of these options [-o -t -l -c]\n");
+          exit(1);
+        } else mode = td;
+        break;
+      case 'c':
+        if(mode!=undefined) {
+          fprintf(stderr, 
+                  "Error: Can only use one of these options [-o -t -l -c]\n");
+          exit(1);
+        }
+        mode = conv;
+        eo_file = optarg;
         break;
       case 'h':
           fprintf(stdout, "%s\n", usagestring);
-          return 0;
+          exit(0);
         break;
       case 'D':
-        mode = degree;
+        heuristic = degree;
         break;
       case 'F':
-        mode = fillin;
+        heuristic = fillin;
         break;
       case 'C':
-        mode = cardinality;
+        heuristic = mcs;
+        break;
+      case 'v':
+        verbose_printing = 1;
         break;
       case '?':
         if (optopt == 'f')
@@ -117,19 +142,19 @@ main (int argc, char **argv)
           fprintf (stderr,
                    "Unknown option character `\\x%x'.\n",
                    optopt);
-        return 1;
+        exit(1);
       case ':':
         fprintf(stderr, "No argument provided, aborting...\n");
-        return 1;
+        exit(1);
       default:
-        abort ();
+        abort();
       }
 
-  for (index = optind; index < argc; index++)
-    fprintf (stdout, "Non-option argument %s not supported\n", argv[index]);
 
+  inputpath = argv[optind];
 
-  if (listmode == 1){
+  /* --------- Benchmark mode ------------- */
+  if (mode==list){
     /* Open input file list and create result file */
     FILE* results = fopen("results.csv", "a");
     if (results == NULL) {perror("Error opening results file"); exit(1);}
@@ -174,8 +199,8 @@ main (int argc, char **argv)
     fclose(results);
     exit(0);
   }
-  else
-  {
+  /* ----------- Analyze single graph -------------- */
+  else if (mode==eo||mode==td) {
     FILE *inputfile = fopen(inputpath, "r");
     if (inputfile == NULL) {perror("Error opening input file"); exit(1);}
 
@@ -184,7 +209,7 @@ main (int argc, char **argv)
     if (g == NULL) {fprintf(stderr, "Error importing graph\n"); exit(1);}
 
     int width;
-    switch (mode)
+    switch (heuristic)
     {
     case degree:
       width = graph_order_degree(g);
@@ -192,48 +217,39 @@ main (int argc, char **argv)
     case fillin:
       width = graph_order_fillin(g);
       break;
-    case cardinality:
+    case mcs:
       width = graph_order_mcs(g);
       break;
 
     default:
+      abort();
       break;
     }
-    printf("File: %s\n", inputpath);
-    printf("Heuristic: %s\n", METHOD[mode]);
-    printf("Ordering: "); 
-    graph_print_ordering(g, stdout);
-    printf("\nWidth: %d\n", width);
-    graph_destroy(g);
-    fclose(inputfile);
+    /* ------- Elimination Ordering only ----------- */
+    if (mode==eo) {
+      if(verbose_printing) {
+        printf("File: %s\n", inputpath);
+        printf("Heuristic: %s\n", STRATEGY[heuristic]);
+        printf("Ordering: "); 
+      }
+      graph_print_ordering(g, stdout);
+      if(verbose_printing) {
+        printf("\nWidth: %d\n", width);
+      }
+      graph_destroy(g);
+      fclose(inputfile);
+    } 
+    /* ------- Tree decomposition conversion ------- */
+    else {
+      if (optind+1 >= argc) {
+        fprintf(stderr, "Error: You need to provide both a graph file and an elimination ordering file\n");
+        exit(1);
+      }
+      char* eo_filepath = argv[optind + 1];
+      FILE *eo_file = fopen(eo_filepath, "r");
+      if (eo_file == NULL) {perror("Error opening input file"); exit(1);}
+    }
+    
   }
-  
-
-  //FILE* results = fopen("results.csv", "w");
-  /* print_file_header(stdout);
-  float start, end;
-  start = clock();
-  Graph g = graph_import(inputpath);
-  if(g==NULL) return 1;
-  end = clock();
-  float time_su = (end-start)/CLOCKS_PER_SEC;
-  
-  start = clock();
-  int width_d = graph_order_degree(g);
-  end = clock();
-  float time_d = (end - start)/CLOCKS_PER_SEC;
-  fprintf(stdout, "Time for setup: %f\n"
-          "Time for execution: %f\n"
-          "Width: %d\n"
-          "Ordering plausible: %d\n"
-          "Vertices: %d, Edges: %d\n",
-           time_su, time_d, width_d,
-           graph_ordering_plausible(g),
-           graph_vertex_count(g),
-           graph_edge_count(g));
-  
-  graph_destroy(g);
-   */
-  
-  return 0;
+  exit(0);
 }

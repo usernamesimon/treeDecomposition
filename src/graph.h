@@ -2,6 +2,8 @@
 */
 #include <stdio.h>
 
+typedef enum strategy { unspecified, degree, fillin, mcs} strategy;
+
 typedef struct graph *Graph;
 
 /* create a new graph with n vertices labeled 0..n-1 and no edges */
@@ -9,6 +11,10 @@ Graph graph_create(int n);
 
 /* import a graph from a file in adjacency list format */
 Graph graph_import(FILE *fstream);
+
+/* import pre existing ordering from a file
+    return 1 on success, 0 otherwise */
+char graph_import_ordering(FILE *fstream);
 
 /* copy a graph*/
 Graph graph_copy(Graph g);
@@ -41,6 +47,13 @@ int graph_order_fillin (Graph g);
     maximum cardinality heuristic.
 */
 int graph_order_mcs (Graph g);
+
+/* Convert an elimination ordering to a 
+    tree decomposition.
+    Assumes the elimination ordering was
+    calculated prior.
+*/
+void graph_eo_to_treedecomp (Graph g);
 
 /* return 1 if every node appears exactly
    once in the ordering of g

@@ -69,13 +69,6 @@ struct Priority_t
     int len;
 };
 
-enum strategy
-{
-    unspecified,
-    degree,
-    fillin,
-    mcs
-};
 struct graph
 {
     int n;                 /* number of vertices */
@@ -984,6 +977,13 @@ int node_update_priority_fillin_and_eliminate_vertex(Graph g, int vertex, char *
     return degree;
 }
 
+/* 
+    TODO: Maybe check if at one point when eliminating vertices
+    the intermediate graph has become complete. In this case we
+    could just add nodes in an arbitrary order because any solution
+    is equivalent.
+*/
+
 int graph_order_degree(Graph g)
 {
     int size = graph_vertex_count(g);
@@ -1127,4 +1127,17 @@ void graph_print_ordering(Graph g, FILE *stream) {
         fprintf(stream, " %d", g->ordering[i]);
     }
     
+}
+
+void eo_to_treedecomp(){}
+
+void graph_eo_to_treedecomp(Graph g) {
+
+}
+
+char graph_import_ordering(FILE *fstream) {
+    char* line = NULL;
+    size_t linelen = 0;
+    line = getline(line, &linelen, fstream);
+    if (!line) return 0;
 }

@@ -671,11 +671,11 @@ int graph_eliminate_vertex(Graph g, int vertex, int *neighbourhood)
         /* AVX-512 POPCOUNTDQ to count bits after
             they were set?
         */
-        /* char* work = (char*)aligned_alloc(32,g->adjacency_size);
+        char* work = (char*)aligned_alloc(32,g->adjacency_size);
         bitwise_or(work, g->adjacency_matrix[i], g->adjacency_matrix[vertex], g->adjacency_size);
         char* delete = g->adjacency_matrix[i];
         g->adjacency_matrix[i] = work;
-        free(delete); */
+        free(delete);
     }
     graph_delete_vertex(g, vertex);
     return degree;
@@ -989,11 +989,15 @@ int graph_order_degree(Graph g)
     int size = graph_vertex_count(g);
     int width = 0;
     calc_initial_degrees(g);
+    /* Buffer for neighbours of eliminated vertex */
+    int *neighbours = (int *)malloc(sizeof(int) * g->n);
+    /* Highest index that might be set */
+    int d = g->n;
     for (int i = 0; i < size; i++)
     {
         struct node_t *best_node = g->priority->heads[g->priority->min_ptr];
+        memset(neighbours, 0, sizeof(int)*d);
         int d = best_node->degree;
-        int *neighbours = (int *)malloc(sizeof(int) * d);
         int current_width = graph_eliminate_vertex(g, best_node->id, neighbours);
         if (current_width > width)
             width = current_width;
@@ -1003,8 +1007,8 @@ int graph_order_degree(Graph g)
         {
             node_update_priority_degree(g, neighbours[j]);
         }
-        free(neighbours);
     }
+    free(neighbours);
     return width;
 }
 

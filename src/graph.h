@@ -14,7 +14,7 @@ Graph graph_import(FILE *fstream);
 
 /* import pre existing ordering from a file
     return 1 on success, 0 otherwise */
-char graph_import_ordering(FILE *fstream);
+char graph_import_ordering(Graph g, FILE *fstream);
 
 /* copy a graph*/
 Graph graph_copy(Graph g);

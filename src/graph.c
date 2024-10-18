@@ -1132,12 +1132,28 @@ void graph_print_ordering(Graph g, FILE *stream) {
 void eo_to_treedecomp(){}
 
 void graph_eo_to_treedecomp(Graph g) {
-
+    
 }
 
-char graph_import_ordering(FILE *fstream) {
+/* Expects a single line with space-separated integers */
+char graph_import_ordering(Graph g, FILE *fstream) {
+    if(!g|!fstream) return 0;
     char* line = NULL;
-    size_t linelen = 0;
-    line = getline(line, &linelen, fstream);
-    if (!line) return 0;
+    size_t linelen;
+    if(getline(&line, &linelen, fstream)<0) {free(line);return 0;}
+    if (!line) {free(line);return 0;}
+    char* tok = strtok(line, " ");
+    for (size_t i = 0; i < g->nodes_len; i++)
+    {
+        if (!tok) {free(line);return 0;}
+        if (sscanf(tok, "%d", &g->ordering[i]) != 1)
+        {
+            fprintf(stderr, "Conversion error\n");
+            free(line);
+            return 0;
+        }
+        tok = strtok(NULL, " ");
+    }
+    free(line);
+    return 1;    
 }

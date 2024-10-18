@@ -9,7 +9,7 @@
 
 #define FILENAME_MAX_LENGTH 50
 
-const char *STRATEGY[] = {"Unspecified", "Min-Degree", "Maximum-Cardinality-Search", "Min-Fill-in-edges"};
+const char *STRATEGY[] = {"Unspecified", "Min-Degree", "Min-Fill-in-edges", "Maximum-Cardinality-Search"};
 
 char *optarg;
 int optind, opterr, optopt;

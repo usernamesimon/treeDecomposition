@@ -9,6 +9,7 @@
 
 #include "graph.h"
 
+#define ALIGNMENT 16
 //#define VALIDATE_FILLIN 1
 
 /* add an undirected edge to an existing graph */
@@ -139,6 +140,17 @@ void bitwise_and(char *result, char *a, char *b, int size)
 #endif
 }
 
+char bit_vectors_equal (char *a, char *b, int size) {
+#ifdef AVX
+
+#else
+    for (int i = 0; i < size; i++)
+    {
+        if ((*(a + i) ^ *(b + i))>0) return 0;
+    }
+    return 1;
+#endif
+}
 /* Given 2 adjacency lists calculates
     - a_not_b: vertices that are neighbours of a but not b
     - b_not_a: vertices that are neighbours of b but not a
@@ -148,6 +160,20 @@ void calculate_uncommon_neigbours(char *a_not_b, char *b_not_a, char *a, char *b
 #ifdef AVX
 
 #else
+    if (!a_not_b) {
+        for (int i = 0; i < size; i++)
+        {
+            *(b_not_a + i) = ~*(a + i) & *(b + i);
+        }
+        return;
+    }
+    else if (!b_not_a) {
+        for (int i = 0; i < size; i++)
+        {
+            *(a_not_b + i) = *(a + i) & ~*(b + i);
+        }
+        return;
+    }
     for (int i = 0; i < size; i++)
     {
 
@@ -212,9 +238,11 @@ int number_of_set_bits(char *ch_pointer, int size)
 }
 
 /* Get the index of the next set bit in
-    adjacency_list starting from start_index.
-    If the bit at start_index is set, start_index
+    <adjacency_list> starting from <start_index>.
+    If the bit at <start_index> is set, <start_index>
     is returned.
+    If no set bit is found the first <size> bytes
+    from <adjacency_list>, -1 is returned
 */
 int get_next_bit_index(char *adjacency_list, int start_index, int size)
 {
@@ -391,11 +419,17 @@ Graph graph_create(int n)
     int size = n / 8;
     if (n % 8 != 0)
         size++;
+    /* Resize to next multiple of alignment */
+    while (size % ALIGNMENT != 0)
+    {
+        size++;
+    }
+    
     g->adjacency_size = size;
 
     for (int i = 0; i < n; i++)
     {
-        g->adjacency_matrix[i] = (char *)aligned_alloc(32, size);
+        g->adjacency_matrix[i] = (char *)aligned_alloc(ALIGNMENT, size);
         if(!g->adjacency_matrix[i]) return NULL;
         memset(g->adjacency_matrix[i], 0, size);
 
@@ -549,7 +583,7 @@ Graph graph_copy(Graph g)
 
     for (int i = 0; i < n; i++)
     {
-        copy->adjacency_matrix[i] = (char *)aligned_alloc(32, copy->adjacency_size);
+        copy->adjacency_matrix[i] = (char *)aligned_alloc(ALIGNMENT, copy->adjacency_size);
         if(!copy->adjacency_matrix[i]) return NULL;
         memcpy(copy->adjacency_matrix[i], g->adjacency_matrix[i], copy->adjacency_size);
 
@@ -633,51 +667,59 @@ void graph_add_edge(Graph g, int u, int v)
     g->m++;
 }
 
+/* From the adjacency matrix take the row corresponding
+    to <vertex>, convert it to a list of indizes and write
+    the result to buffer. The caller is responsible for
+    sizing the buffer correctly! (degree of vertex) */
+void convert_node_adj_to_list(Graph g, int vertex, int *buffer) {
+    int neighbour = -1;
+    for (int i = 0; i < g->nodes[vertex]->degree; i++)
+    {
+        neighbour = get_next_bit_index(g->adjacency_matrix[vertex], neighbour+1, g->adjacency_size);
+        buffer[i] = neighbour;
+    }
+    
+}
+
 /* eliminate a vertex from the graph
    and return its degree upon elimination
 */
 int graph_eliminate_vertex(Graph g, int vertex, int *neighbourhood)
 {
+    char need_to_free = 0;
     if (node_invalid(g, vertex))
         return -1; // TODO: what to return?
-
+    
     int degree = g->nodes[vertex]->degree;
-    /* for each vertex of graph */
-    int found = 0;
-    for (int i = 0; i < g->nodes_len && found < degree; i++)
-    {
-        /* if it is a neighbour to the vertex which
-            is eliminated */
-
-        if (!graph_has_edge(g, vertex, i))
-            continue;
-        if (neighbourhood)
-            neighbourhood[found] = i;
-        found++;
-        /* count the number of new neighbours */
-        for (int j = i + 1; j < g->nodes_len; j++)
-        {
-            if (graph_has_edge(g, vertex, j))
-            {
-                graph_add_edge(g, i, j);
-            }
-        }
-        /* TODO: find better way to do this */
-        /*  We could do a bitwise OR with the adjacency
-            list of the vertex to be eliminated to form
-            the clique in each neighbour.
-            BUT how to update the degree then?
-        */
-        /* AVX-512 POPCOUNTDQ to count bits after
-            they were set?
-        */
-        char* work = (char*)aligned_alloc(32,g->adjacency_size);
-        bitwise_or(work, g->adjacency_matrix[i], g->adjacency_matrix[vertex], g->adjacency_size);
-        char* delete = g->adjacency_matrix[i];
-        g->adjacency_matrix[i] = work;
-        free(delete);
+    assert(!(degree < 0));
+    if (!neighbourhood) {
+        neighbourhood = (int*)malloc(sizeof(int)*degree);
+        need_to_free = 1;
     }
+    /* get the list of neighbours */
+    convert_node_adj_to_list(g, vertex, neighbourhood);
+
+    /* To form a clique we have to bitwise-OR the adjacency
+        list of vertex to all its neighbours */
+    for (size_t i = 0; i < degree; i++)
+    {
+        int neighbour = neighbourhood[i];
+        char* work = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+        memset(work, 0, g->adjacency_size);
+        bitwise_or(work,
+                    g->adjacency_matrix[neighbour],
+                    g->adjacency_matrix[vertex],
+                    g->adjacency_size);
+        /* Remove neighbour from its own adjacency list */
+        work[neighbour / 8] &= ~(0x1 << (7 - neighbour % 8));
+
+        /* Update adjacency matrix and degree of neighbour*/
+        free(g->adjacency_matrix[neighbour]);
+        g->adjacency_matrix[neighbour] = work;
+        g->nodes[neighbour]->degree = number_of_set_bits(work, g->adjacency_size); 
+    }    
     graph_delete_vertex(g, vertex);
+    if (need_to_free) free(neighbourhood);
     return degree;
 }
 
@@ -765,12 +807,13 @@ void calc_initial_degrees(Graph g)
     for later use with the mcs method */
 void calc_initial_mcs(Graph g)
 {
-    // g->strategy = mcs;
-    /* There is no ordering yet, so every
+    /* The cardinality set is still empty, so every
         node is in the 0 set
     */
-    for (int i = 0; i < g->n; i++)
+    for (int i = 0; i < g->nodes_len; i++)
     {
+        if (node_invalid(g, i))
+            continue;
         priority_add_node(g, i, 0);
     }
 }
@@ -783,23 +826,23 @@ int node_calc_fillin(Graph g, int node)
 {
     int degree = g->nodes[node]->degree;
     int fill_in_edges = 0;
-    int found = 0;
-    for (int neighbour1 = 0; neighbour1 < g->nodes_len && found < degree; neighbour1++)
+    int* neighbours = (int*)malloc(sizeof(int)*degree);
+    convert_node_adj_to_list(g, node, neighbours);
+    char* work = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+
+    for (int neighbour = 0; neighbour < degree; neighbour++)
     {
-        /* if neighbour1 is a neighbour to the vertex i */
-        if (!graph_has_edge(g, neighbour1, node))
-            continue;
-        found++;
-        for (int neighbour2 = neighbour1 + 1; neighbour2 < g->nodes_len; neighbour2++)
-        {
-            /* if neighbour2 is also neighbour of i, check
-                if there is an edge between neighbour1 and neighbour2*/
-            if (!graph_has_edge(g, neighbour2, node))
-                continue;
-            if (!graph_has_edge(g, neighbour1, neighbour2))
-                fill_in_edges++;
-        }
+        /* Calculate the edges to add for neighbour */
+        calculate_uncommon_neigbours(work, NULL, g->adjacency_matrix[node], 
+                    g->adjacency_matrix[neighbours[neighbour]], g->adjacency_size);
+        /* Subtract 1 because neighbour needs no edge to itself */
+        fill_in_edges += number_of_set_bits(work, g->adjacency_size) - 1;        
     }
+    /* We counted each edge twice */
+    fill_in_edges = fill_in_edges / 2;
+
+    free(neighbours);
+    free(work);
     return fill_in_edges;
 }
 
@@ -811,6 +854,8 @@ void calc_initial_fillin(Graph g)
 {
     for (int i = 0; i < g->nodes_len; i++)
     {
+        if (node_invalid(g, i))
+            continue;
         int fillin = node_calc_fillin(g, i);
         priority_add_node(g, i, fillin);
     }
@@ -839,18 +884,19 @@ void node_update_priority_mcs(Graph g, int vertex)
         move up in the priority lists by one index
     */
     //assert(!g->nodes[vertex]->in_set);
-    for (int i = 0; i < g->nodes_len; i++)
+    int size = sizeof(int)*g->nodes[vertex]->degree;
+    int* neighbours = (int*)malloc(size);
+    convert_node_adj_to_list(g, vertex, neighbours);
+    for (int i = 0; i < g->nodes[vertex]->degree; i++)
     {
-        if (!graph_has_edge(g, vertex, i))
-            continue;
-        if (g->nodes[i]->in_set)
-            continue;
-        int current = g->nodes[i]->priority_index;
-        priority_delete_node(g, i);
-        priority_add_node(g, i, current + 1);
+        
+        int current = neighbours[i];
+        priority_delete_node(g, current);
+        priority_add_node(g, current, g->nodes[current]->priority_index + 1);
     }
     g->nodes[vertex]->in_set = 1;
     priority_delete_node(g, vertex);
+    free(neighbours);
 }
 
 int node_update_priority_fillin_and_eliminate_vertex(Graph g, int vertex, char *common, char *vertex_minus_neighbour,
@@ -990,7 +1036,7 @@ int graph_order_degree(Graph g)
     int width = 0;
     calc_initial_degrees(g);
     /* Buffer for neighbours of eliminated vertex */
-    int *neighbours = (int *)malloc(sizeof(int) * g->n);
+    int *neighbours = (int *)malloc(sizeof(int) * g->nodes_len);
     /* Highest index that might be set */
     int d = g->n;
     for (int i = 0; i < size; i++)
@@ -1015,11 +1061,11 @@ int graph_order_degree(Graph g)
 int graph_order_fillin(Graph g)
 {
     /* create bit vectors for calculations*/
-    char *common = aligned_alloc(32, g->adjacency_size);
-    char *vertex_minus_neighbour = aligned_alloc(32, g->adjacency_size);
-    char *neighbour_minus_vertex = aligned_alloc(32, g->adjacency_size);
-    char *neighbour1_minus_neighbour2 = aligned_alloc(32, g->adjacency_size);
-    char *neighbour2_minus_neighbour1 = aligned_alloc(32, g->adjacency_size);
+    char *common = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+    char *vertex_minus_neighbour = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+    char *neighbour_minus_vertex = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+    char *neighbour1_minus_neighbour2 = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
+    char *neighbour2_minus_neighbour1 = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
 
     int size = graph_vertex_count(g);
     int width = 0;
@@ -1060,20 +1106,39 @@ int graph_order_mcs(Graph g)
 {
     int size = graph_vertex_count(g);
     int width = 0;
+    /* need copy to later calculate the width */
+    Graph copy = graph_copy(g);
     calc_initial_mcs(g);
+    /* Do the ordering */
     for (int i = size - 1; i >= 0; i--)
     {
-        int best_node = g->priority->heads[g->priority->max_ptr]->id;
-        g->ordering[i] = best_node;
-        node_update_priority_mcs(g, best_node);
+        /* do a secondary priority -> min degree */
+        struct node_t* best_node = g->priority->heads[g->priority->max_ptr];
+        int best_degree = best_node->degree;
+        struct node_t* next = best_node->next;
+        while (next)
+        {
+            if (next->degree < best_degree) {
+                best_node = next;
+                best_degree = next->degree;
+            }
+            next = next->next;
+        }
+        
+        g->ordering[i] = best_node->id;
+        node_update_priority_mcs(g, best_node->id);
+        graph_delete_vertex(g, best_node->id);
     }
-    /* calculate treewidth */
+
+    /* calculate treewidth
+        As we did not actually do any eliminations we have to do it now */
     for (int i = 0; i < size; i++)
     {
-        int current_width = graph_eliminate_vertex(g, g->ordering[i], NULL);
+        int current_width = graph_eliminate_vertex(copy, g->ordering[i], NULL);
         if (current_width > width)
             width = current_width;
     }
+    graph_destroy(copy);
     return width;
 }
 
@@ -1136,6 +1201,11 @@ void graph_print_ordering(Graph g, FILE *stream) {
 void eo_to_treedecomp(){}
 
 void graph_eo_to_treedecomp(Graph g) {
+
+    for (size_t i = 0; i < g->nodes_len; i++)
+    {
+        /* code */
+    }
     
 }
 

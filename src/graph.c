@@ -15,7 +15,10 @@
 /* add an undirected edge to an existing graph */
 void graph_add_edge(Graph, int vertex1, int vertex2);
 
-/* delete an undirected edge from a graph */
+/* delete the edge from <vertex1> to <vertex2> from the graph.
+    Call this twice with vertices swapped if you want to delete
+    both directions
+*/
 void graph_delete_edge(Graph g, int vertex1, int vertex2);
 
 /* delete node vertex from the graph.
@@ -116,6 +119,16 @@ void *realloc_zero(void *pBuffer, size_t oldSize, size_t newSize)
     return pNew;
 }
 
+void set_bit(char* pointer, int index, char value) {
+    if (value)
+    {
+        pointer[index/8] |= 0x1 << (7 - index % 8);
+    }
+    else {
+        pointer[index/8] &= ~(0x1 << (7 - index % 8));
+    }
+}
+
 void bitwise_or(char *result, char *a, char *b, int size)
 {
 #ifdef AVX
@@ -140,17 +153,6 @@ void bitwise_and(char *result, char *a, char *b, int size)
 #endif
 }
 
-char bit_vectors_equal (char *a, char *b, int size) {
-#ifdef AVX
-
-#else
-    for (int i = 0; i < size; i++)
-    {
-        if ((*(a + i) ^ *(b + i))>0) return 0;
-    }
-    return 1;
-#endif
-}
 /* Given 2 adjacency lists calculates
     - a_not_b: vertices that are neighbours of a but not b
     - b_not_a: vertices that are neighbours of b but not a
@@ -667,18 +669,19 @@ void graph_add_edge(Graph g, int u, int v)
     g->m++;
 }
 
-/* From the adjacency matrix take the row corresponding
-    to <vertex>, convert it to a list of indizes and write
-    the result to buffer. The caller is responsible for
+/* Convert the bit vector pointed to by <pointer> with length <size>
+    to a list of integers where each set bit in the vector is added
+     and write the result to <buffer>. The caller is responsible for
     sizing the buffer correctly! (degree of vertex) */
-void convert_node_adj_to_list(Graph g, int vertex, int *buffer) {
+int convert_bit_field_to_list(char* pointer, int size, int *buffer) {
     int neighbour = -1;
-    for (int i = 0; i < g->nodes[vertex]->degree; i++)
+    int i = 0;
+    while ((neighbour = get_next_bit_index(pointer, neighbour+1, size)) >=0 )
     {
-        neighbour = get_next_bit_index(g->adjacency_matrix[vertex], neighbour+1, g->adjacency_size);
         buffer[i] = neighbour;
+        i++;
     }
-    
+    return i;
 }
 
 /* eliminate a vertex from the graph
@@ -697,7 +700,7 @@ int graph_eliminate_vertex(Graph g, int vertex, int *neighbourhood)
         need_to_free = 1;
     }
     /* get the list of neighbours */
-    convert_node_adj_to_list(g, vertex, neighbourhood);
+    convert_bit_field_to_list(g->adjacency_matrix[vertex], g->adjacency_size, neighbourhood);
 
     /* To form a clique we have to bitwise-OR the adjacency
         list of vertex to all its neighbours */
@@ -728,25 +731,29 @@ void graph_delete_vertex(Graph g, int vertex)
     if (node_invalid(g, vertex))
         return;
     struct node_t *current = g->nodes[vertex];
-    /* decrease the degree of all neighbours */
-    for (int i = 0; i < g->nodes_len; i++)
+    int *neighbours = (int*)malloc(sizeof(int)*current->degree);
+    convert_bit_field_to_list(g->adjacency_matrix[vertex], g->adjacency_size, neighbours);
+    /* Delete all edges from its neighbours to vertex. Notice that we do not delete
+        the edges originating from vertex. This is so we can
+        use the adjacency_matrix for the conversion to tree decomposition
+        after all vertices have been eliminated. 
+    */
+    for (int i = 0; i < current->degree; i++)
     {
-        if (!graph_has_edge(g, vertex, i))
-            continue;
-        graph_delete_edge(g, vertex, i);
+        int neighbour = neighbours[i];
+        graph_delete_edge(g, neighbour, vertex);
     }
     priority_delete_node(g, vertex);
     current->is_deleted = 1;
     g->n--;
+    free(neighbours);
 }
 
 void graph_delete_edge(Graph g, int vertex1, int vertex2)
 {
 
     g->adjacency_matrix[vertex1][vertex2 / 8] &= ~(0x1 << (7 - vertex2 % 8));
-    g->adjacency_matrix[vertex2][vertex1 / 8] &= ~(0x1 << (7 - vertex1 % 8));
     g->nodes[vertex1]->degree--;
-    g->nodes[vertex2]->degree--;
     g->m--;
 }
 
@@ -827,7 +834,7 @@ int node_calc_fillin(Graph g, int node)
     int degree = g->nodes[node]->degree;
     int fill_in_edges = 0;
     int* neighbours = (int*)malloc(sizeof(int)*degree);
-    convert_node_adj_to_list(g, node, neighbours);
+    convert_bit_field_to_list(g->adjacency_matrix[node], g->adjacency_size, neighbours);
     char* work = (char*)aligned_alloc(ALIGNMENT, g->adjacency_size);
 
     for (int neighbour = 0; neighbour < degree; neighbour++)
@@ -886,7 +893,7 @@ void node_update_priority_mcs(Graph g, int vertex)
     //assert(!g->nodes[vertex]->in_set);
     int size = sizeof(int)*g->nodes[vertex]->degree;
     int* neighbours = (int*)malloc(size);
-    convert_node_adj_to_list(g, vertex, neighbours);
+    convert_bit_field_to_list(g->adjacency_matrix[vertex], g->adjacency_size, neighbours);
     for (int i = 0; i < g->nodes[vertex]->degree; i++)
     {
         
@@ -1200,12 +1207,101 @@ void graph_print_ordering(Graph g, FILE *stream) {
 
 void eo_to_treedecomp(){}
 
+void d_print_neighbours(Graph g) {
+    int *neighbours = (int*)malloc(sizeof(int)*g->nodes_len);
+    for (size_t i = 0; i < g->nodes_len; i++) {
+        memset(neighbours, 0, sizeof(int)*g->nodes_len);
+        convert_bit_field_to_list(g->adjacency_matrix[i], g->adjacency_size, neighbours);
+        printf("%ld:\t", i);
+        for (size_t j = 0; j < g->nodes[i]->degree; j++)
+        {
+            printf(" %d", neighbours[j]);
+        }
+        printf("\n");
+    }
+    free(neighbours);
+}
+
+void print_tree_decomposition(Graph tree, char** bags) {
+    /* print the edges of the tree */
+    int size = sizeof(int)*tree->nodes_len;
+    //size = size % ALIGNMENT == 0 ? size : size/ALIGNMENT * ALIGNMENT + ALIGNMENT;
+    int* neighbours = (int*)malloc(size);
+    for (int i = 0; i < tree->n; i++)
+    {
+        memset(neighbours, 0, sizeof(int)*tree->nodes_len);
+        convert_bit_field_to_list(tree->adjacency_matrix[i], tree->adjacency_size, neighbours);
+        for (int j = 0; j < tree->nodes[i]->degree; j++)
+        {
+            if (neighbours[j]<i) continue;
+            printf("N%d,N%d,\n", i, neighbours[j]);
+        }
+        
+    }
+    /* print the bags */
+    for (int i = 0; i < tree->n; i++)
+    {
+        int size = number_of_set_bits(bags[i], tree->adjacency_size);
+        memset(neighbours, 0, sizeof(int)*tree->nodes_len);
+        convert_bit_field_to_list(bags[i], tree->adjacency_size, neighbours);
+        printf("N%d,,", i);
+        for (int j = 0; j < size - 1; j++)
+        {
+            printf("%d;", neighbours[j]);
+        }
+        printf("%d", neighbours[size - 1]);
+        printf("\n");
+        
+    }
+    free(neighbours);
+    
+}
 void graph_eo_to_treedecomp(Graph g) {
 
     for (size_t i = 0; i < g->nodes_len; i++)
     {
-        /* code */
+        graph_eliminate_vertex(g, g->ordering[i], NULL);
     }
+    Graph tree = graph_create(g->nodes_len);
+    for (int i = 0; i < tree->nodes_len; i++)
+    {
+        graph_delete_vertex(tree, i);
+    }
+
+    /* the bags of the tree decomposition. bags[0] corresponds to tree->nodes[0], etc.*/
+    char** bags = (char**)malloc(sizeof(char*)*g->nodes_len);
+    /* add first bag/node */
+    tree->nodes[0]->is_deleted = 0;
+    tree->n++;
+    bags[0] = g->adjacency_matrix[g->ordering[g->nodes_len-1]];
+    set_bit(bags[0], g->ordering[g->nodes_len-1],1);
+    
+    int size = g->adjacency_size;
+    char* work = (char*)aligned_alloc(ALIGNMENT, size);
+    for (int i = 1; i < g->nodes_len; i++)
+    {
+        tree->nodes[i]->is_deleted = 0;
+        int vertex = g->ordering[g->nodes_len - i - 1];
+        char* neighbours = g->adjacency_matrix[vertex];
+        /* search the already existing bags for a bag that contains all of neighbours */
+        for (int j = 0; j < tree->n; j++)
+        {
+            memset(work, 0, size);
+            calculate_uncommon_neigbours(work, NULL, neighbours, bags[j], size);
+            if (number_of_set_bits(work, size) == 0)
+            {
+                bags[i] = neighbours;
+                set_bit(bags[i], vertex, 1);
+                graph_add_edge(tree, i, j);
+                break;
+            }           
+        }
+        tree->n++;        
+    }
+    free(work);
+    print_tree_decomposition(tree, bags);
+    free(bags);
+    graph_destroy(tree);
     
 }
 

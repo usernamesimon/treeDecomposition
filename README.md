@@ -30,9 +30,12 @@ Provide the graphs in networkx's adjacency list format (https://networkx.org/doc
 
 To create an elimination ordering for a single file, use the `-s` option. You can also specify which heuristic to use.
 Use `treedecomp -h` to print the usage string.
-For example if you want to analyze a file `mygraph.al` located in a subfolder `data` using the Min-Fill-in heuristic, the command would be `../build/treedecomp -s mygraph.al -F`. The output will be printed to stdout.
+For example if you want to analyze a file `mygraph.al` located in a subfolder `data` using the Min-Fill-in heuristic, the command would be `../build/treedecomp -o -F mygraph.al`. The output will be printed to stdout.
+You can use the `-v` option to get more verbose printing.
 
 To analyze multiple files in benchmark mode, create a file that lists all files to analyze e.g. `filelist.txt` and use the `-l` option. The results will be saved to `results.csv`.
+
+To convert an elimination ordering to a tree decomposition, use something like `../build/treedecomp -t mygraph.al mygraph.eo` where `mygraph.al` is the file of the graph itself and `mygrap.eo` is a file containing the corresponding elimination ordering. (Can be created by `../build/treedecomp -o -F mygraph.al > mygraph.eo` beforehand)
 
 ## Recreating benchmark results
 

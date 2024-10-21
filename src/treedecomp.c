@@ -295,13 +295,13 @@ int main(int argc, char **argv)
 
       if (verbose_printing)
       {
-        printf("File: %s\n", inputpath);
-        printf("Heuristic: %s\n", STRATEGY[heuristic]);
+        printf("Graph file: %s\n", inputpath);
+        printf("Elimination ordering file: %s\n", eo_filepath);
         printf("Ordering: ");
         graph_print_ordering(g, stdout);
         printf("\n");
       }
-      
+      graph_eo_to_treedecomp(g);
     }
     graph_destroy(g);
   }

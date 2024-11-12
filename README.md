@@ -26,6 +26,8 @@ Use `build/treedecomp` or `.vscode/treedecomp` depending on how you built it to 
 
 Provide the graphs in networkx's adjacency list format (https://networkx.org/documentation/stable/reference/readwrite/adjlist.html)
 
+Also tries to read files in DIMACS format. Make sure to have an edge from 0 in the first line if your numbering scheme is [0 -> N-1]. If the numbering scheme is [1 -> N] it will be converted to [0 -> N-1]! 
+
 ## Usage
 
 To create an elimination ordering for a single file, use the `-s` option. You can also specify which heuristic to use.
@@ -74,4 +76,8 @@ Attention, this will overwrite an existing `plot.png`!
 `python plots.py`
 
 # Result
-![plot](./plot.png)
+![plot](./plot_origninal.png)
+
+# libTW graphs
+The graphs contained in folder `libTW-graphs` are taken from https://www.treewidth.com 
+This was done to get a comparison to a known implementation. The results can be observed in `libTW_plots.png`. MCS-min refers to the MCS heuristic where ties in the cardinality are broken by selecting the vertex with minimum degree. Similarly in MCS-max the vertex with maximum degree was selected.

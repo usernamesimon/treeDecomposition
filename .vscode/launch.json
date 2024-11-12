@@ -7,7 +7,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/.vscode/treedecomp",
             //"args": ["-l", "filelist.txt"],
-            "args": ["-o", "-v", "-C", "test.al"],
+            "args": ["-o", "-v", "-C", "anna.dgf"],
             //"args": ["-t", "test10.al", "test10.eo"],
             "stopAtEntry": false,
             "cwd": "../",

@@ -464,91 +464,187 @@ Graph graph_import(FILE *fstream)
     int n;
     char *line = NULL;
     size_t linelen = 0;
+    Graph g = NULL;
 
     if (fstream == NULL)
     {
         return NULL;
     }
-    if (getline(&line, &linelen, fstream) < 0)
-    {
-        // no point in continuing if we could not read
-        free(line);
-        return NULL;
-    }
-    char *str = line;
-    char *tok = strtok(str, " ");
-    if (tok == NULL)
-        return NULL;
-    if (strcmp(tok, "#") != 0)
-        return NULL;
-    tok = strtok(NULL, " ");
-    if (tok == NULL)
-        return NULL;
-    if (strcmp(tok, "nodes") != 0)
-        return NULL;
-    tok = strtok(NULL, " ");
-    if (tok == NULL)
-        return NULL;
-    // tok should now be the number of vertices as string
-    if (sscanf(tok, "%d", &n) != 1)
-    {
-        fprintf(stderr, "Conversion error\n");
-        return NULL;
-    }
-    // fprintf(stdout, "Number of vertices: %d\n", n);
-
-    Graph g = graph_create(n);
-    if(!g) return NULL;
-
-    // populate the adjacency lists of each node
-    for (int i = 0; i < g->n; i++)
-    {
-        // get the next line from file
+    /* skip over comment lines */
+    char *str;
+    do {
         if (getline(&line, &linelen, fstream) < 0)
         {
-            // unexpected EOF etc.
-            fprintf(stderr, "Error parsing the adjacency list for node %d\n", i);
-            graph_destroy(g);
+            // no point in continuing if we could not read
             free(line);
             return NULL;
         }
-        // split line into tokens and convert to int
-        int neighbour_count = 0;
-        int node = 0;
-        char *str = line;
-        tok = strtok(str, " ");
-        // the first entry in a line is the node itself
-        if (tok != NULL)
-        {
-            if (sscanf(tok, "%d", &node) != 1)
-            {
-                fprintf(stderr, "Conversion error\n");
-                graph_destroy(g);
-                return NULL;
-            }
-            //assert(node == i);
-            tok = strtok(NULL, " ");
-        }
-        while (tok != NULL)
-        {
-            if(neighbour_count > n) {
-                fprintf(stderr, "Error importing: too many neighbours\n");
-                graph_destroy(g);
-                return NULL;
-            };
-            int neighbour;
-            if (sscanf(tok, "%d", &neighbour) != 1)
-            {
-                fprintf(stderr, "Conversion error\n");
-                graph_destroy(g);
-                return NULL;
-            }
-            neighbour_count++;
-            graph_add_edge(g, node, neighbour);
+        str = line;
+    } while (str[0] == 'c');
 
+    /* check for valid file syntax */
+    char *tok = strtok(str, " ");
+    if (tok == NULL) return NULL;
+    if (strcmp(tok, "p") != 0) return NULL;
+
+    tok = strtok(NULL, " ");
+    if (tok == NULL)
+        return NULL;
+
+    /* Decide on representation. Supported are adjacency list format ("nodes") and edge list ("edge")*/
+    if (strcmp(tok, "nodes") == 0) {
+        tok = strtok(NULL, " ");
+        if (tok == NULL)
+            return NULL;
+        // tok should now be the number of vertices as string
+        if (sscanf(tok, "%d", &n) != 1)
+        {
+            fprintf(stderr, "Conversion error\n");
+            return NULL;
+        }
+
+        g = graph_create(n);
+        if(!g) return NULL;
+
+        // populate the adjacency lists of each node
+        for (int i = 0; i < g->n; i++)
+        {
+            // get the next line from file
+            if (getline(&line, &linelen, fstream) < 0)
+            {
+                // unexpected EOF etc.
+                fprintf(stderr, "Error parsing the adjacency list for node %d\n", i);
+                graph_destroy(g);
+                free(line);
+                return NULL;
+            }
+            // split line into tokens and convert to int
+            int neighbour_count = 0;
+            int node = 0;
+            char *str = line;
+            tok = strtok(str, " ");
+            // the first entry in a line is the node itself
+            if (tok != NULL)
+            {
+                if (sscanf(tok, "%d", &node) != 1)
+                {
+                    fprintf(stderr, "Conversion error\n");
+                    graph_destroy(g);
+                    return NULL;
+                }
+                //assert(node == i);
+                tok = strtok(NULL, " ");
+            }
+            while (tok != NULL)
+            {
+                if(neighbour_count > n) {
+                    fprintf(stderr, "Error importing: too many neighbours\n");
+                    graph_destroy(g);
+                    return NULL;
+                };
+                int neighbour;
+                if (sscanf(tok, "%d", &neighbour) != 1)
+                {
+                    fprintf(stderr, "Conversion error\n");
+                    graph_destroy(g);
+                    return NULL;
+                }
+                neighbour_count++;
+                graph_add_edge(g, node, neighbour);
+
+                tok = strtok(NULL, " ");
+            }
+        }
+    } else if (strcmp(tok, "edge") == 0) {
+        /* get number of vertices */
+        tok = strtok(NULL, " ");
+        if (tok == NULL)
+            return NULL;
+        // tok should now be the number of vertices as string
+        if (sscanf(tok, "%d", &n) != 1)
+        {
+            fprintf(stderr, "Conversion error\n");
+            return NULL;
+        }
+
+        /* get number of edges */
+        int edges = 0;
+        tok = strtok(NULL, " ");
+        if (tok == NULL)
+            return NULL;
+        // tok should now be the number of edges as string
+        if (sscanf(tok, "%d", &edges) != 1)
+        {
+            fprintf(stderr, "Conversion error\n");
+            return NULL;
+        }
+
+        g = graph_create(n);
+        if(!g) return NULL;
+        
+        /* Try to detect if numbering starts from 0 or 1 */
+        int numbering_scheme = 1;
+
+        // read in the edges
+        for (int i = 0; i < edges; i++)
+        {
+            // get the next line from file
+            if (getline(&line, &linelen, fstream) < 0)
+            {
+                // unexpected EOF etc.
+                fprintf(stderr, "Error the %d`st edge entry\n", i);
+                graph_destroy(g);
+                free(line);
+                return NULL;
+            }
+            // skip comments and empty lines
+            if (line[0] == 'c' || line[0] == '\r' || line[0] == '\n')
+            {
+                i--;
+                continue;
+            }
+            
+            str = line;
+            tok = strtok(str, " ");
+            if (tok == NULL) return NULL;
+            if (strcmp(tok, "e") != 0) return NULL;
+            // split line into tokens and convert to int
+            // the first entry in a line is the sink
+            int source;
             tok = strtok(NULL, " ");
+            if (tok == NULL) return NULL;
+            if (sscanf(tok, "%d", &source) != 1)
+            {
+                fprintf(stderr, "Conversion error\n");
+                graph_destroy(g);
+                return NULL;
+            }
+            if (source == 0 && numbering_scheme > 0)
+            {
+                if (i == 0) numbering_scheme = 0;
+                else {
+                    fprintf(stderr, "Found 0 numbering scheme too late (entry %d).\n"
+                     "Make sure the first edge entry has source 0 if you number from 0\n", i);
+                    return NULL;
+                }
+            }
+            
+            // the second one is the sink
+            int sink;
+            tok = strtok(NULL, " ");
+            if (tok == NULL) return NULL;
+            if (sscanf(tok, "%d", &sink) != 1)
+            {
+                fprintf(stderr, "Conversion error\n");
+                graph_destroy(g);
+                return NULL;
+            }
+            /* It seems people like to count from 1 */
+            graph_add_edge(g, source-numbering_scheme, sink-numbering_scheme);
         }
     }
+    // fprintf(stdout, "Number of vertices: %d\n", n);
+
     free(line);
     return g;
 }

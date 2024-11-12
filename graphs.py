@@ -2,7 +2,7 @@ import networkx as nx
 import argparse
 import os
 
-def write_graph(G, file, comments="#", delimiter=" ", encoding="utf-8"):
+def write_graph(G, file, parameter_c="p", delimiter=" ", encoding="utf-8"):
     """
     Write the graph G to a file.
     First line defines the number of vertices.
@@ -13,7 +13,7 @@ def write_graph(G, file, comments="#", delimiter=" ", encoding="utf-8"):
     import networkx
    
     with open(file, "wb") as fd:
-        fd.write(f"{comments} nodes {G.number_of_nodes()}\n".encode(encoding))
+        fd.write(f"{parameter_c} nodes {G.number_of_nodes()}\n".encode(encoding))
         for line in networkx.generate_adjlist(G, delimiter):
             line += "\n"
             fd.write(line.encode(encoding))

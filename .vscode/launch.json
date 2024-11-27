@@ -7,7 +7,7 @@
             "request": "launch",
             "program": "${workspaceFolder}/.vscode/treedecomp",
             //"args": ["-l", "filelist.txt"],
-            "args": ["-o", "-v", "-C", "anna.dgf"],
+            "args": ["-o", "-v", "-F", "./data/ER_1000_0.75_0.al"],
             //"args": ["-t", "test10.al", "test10.eo"],
             "stopAtEntry": false,
             "cwd": "../",

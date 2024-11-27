@@ -76,7 +76,7 @@ Attention, this will overwrite an existing `plot.png`!
 `python plots.py`
 
 # Result
-![plot](./plot_origninal.png)
+![plot](./plot_original.png)
 
 # libTW graphs
 The graphs contained in folder `libTW-graphs` are taken from https://www.treewidth.com 

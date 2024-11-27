@@ -1132,6 +1132,26 @@ int node_update_priority_fillin_and_eliminate_vertex(Graph g, int vertex, char *
     could just add nodes in an arbitrary order because any solution
     is equivalent.
 */
+void graph_order_abort(Graph g, strategy heuristic, int remaining) {
+    if (heuristic == mcs)
+    {
+        for (int i = remaining; i >= 0; i--) {
+            struct node_t *best_node = g->priority->heads[g->priority->min_ptr];
+            priority_delete_node(g, best_node->id);
+            g->ordering[i] = best_node->id;
+        }
+        
+    } else
+    {
+        for (int i = remaining; i < g->nodes_len; i++)
+        {
+            struct node_t *best_node = g->priority->heads[g->priority->min_ptr];
+            priority_delete_node(g, best_node->id);
+            g->ordering[i] = best_node->id;
+        } 
+        
+    }    
+}
 
 int graph_order_degree(Graph g)
 {
@@ -1175,6 +1195,16 @@ int graph_order_fillin(Graph g)
     calc_initial_fillin(g);
     for (int i = 0; i < size; i++)
     {
+        
+        // check if the graph is complete
+        int treshhold = g->n*(g->n - 1)/2;
+        if (g->m == treshhold)
+        {
+            graph_order_abort(g, fillin, i);
+            if(i-1>width) width = i-1;
+            break;
+        }
+        
         struct node_t *best_node = g->priority->heads[g->priority->min_ptr];
         int current_width = node_update_priority_fillin_and_eliminate_vertex(
             g, best_node->id, common, vertex_minus_neighbour,

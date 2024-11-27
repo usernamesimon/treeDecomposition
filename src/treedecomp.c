@@ -237,6 +237,8 @@ int main(int argc, char **argv)
     /* ------- Elimination Ordering only ----------- */
     if (mode == eo)
     {
+      float start, end, time_f;
+      if(verbose_printing) start = clock();
 
       int width;
       switch (heuristic)
@@ -257,6 +259,8 @@ int main(int argc, char **argv)
       }
       if (verbose_printing)
       {
+        end = clock();
+        time_f = (end - start) / CLOCKS_PER_SEC;
         printf("File: %s\n", inputpath);
         printf("Heuristic: %s\n", STRATEGY[heuristic]);
         printf("Ordering: ");
@@ -266,6 +270,7 @@ int main(int argc, char **argv)
       if (verbose_printing)
       {
         printf("Width: %d\n", width);
+        printf("Execution time of ordering: %f\n", time_f);
       }
     }
     /* ------- Tree decomposition conversion ------- */
